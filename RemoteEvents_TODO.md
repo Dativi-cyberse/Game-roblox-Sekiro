@@ -1,0 +1,5 @@
+- [x] Create src/shared/Remotes/Combat/M1Event.lua
+- [x] Create src/shared/Remotes/Combat/GuardEvent.lua
+- [x] Create src/shared/Remotes/Combat/SprintEvent.lua
+- [x] Create src/shared/Remotes/Combat/TargetLockEvent.lua
+- [x] Create src/shared/Remotes/Interaction/InteractEvent.lua

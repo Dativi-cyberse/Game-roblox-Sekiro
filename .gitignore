@@ -1,0 +1,9 @@
+# Project place file
+/Game roblox đầu tay.rbxlx
+
+# Roblox Studio lock files
+/*.rbxlx.lock
+/*.rbxl.lock
+.claude/
+
+sourcemap.json

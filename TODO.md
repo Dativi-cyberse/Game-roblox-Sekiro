@@ -1,0 +1,10 @@
+- [ ] Require PlayerState module
+- [ ] Replace playerData with PlayerStates table
+- [ ] Modify ensureData to create PlayerState
+- [ ] Add PlayerAdded and PlayerRemoving connections
+- [ ] Update all references from data.stats to data
+- [ ] Add missing properties to PlayerState (cooldowns, lastAttackTime, currentTarget, EquipmentQuality)
+- [ ] Update state checks and sets to use PlayerState flags and methods
+- [ ] Replace startRegenLoop with startTickLoop calling PlayerState:Tick(dt)
+- [ ] Ensure Tick loop only runs if PlayerStates not empty
+- [ ] Test the changes
