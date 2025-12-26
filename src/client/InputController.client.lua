@@ -17,6 +17,7 @@ local mouse = player and player:GetMouse()
 
 -- Local cached remote references (may be nil if server not yet created them)
 local M1Event, GuardEvent, SprintEvent, TargetLockEvent, InteractEvent
+local AttackRemote, ParryRemote, BlockRemote, DeathblowRemote
 
 -- Track which missing warnings we've emitted to avoid spamming output
 local warned = {}
@@ -61,8 +62,19 @@ local function resolveRemotes()
 	_G.SprintEvent = nil
 	_G.TargetLockEvent = nil
 	_G.InteractEvent = nil
+	_G.AttackRemote = nil
+	_G.ParryRemote = nil
+	_G.BlockRemote = nil
+	_G.DeathblowRemote = nil
 
 	if combat then
+		-- New Sekiro-style remotes
+		setIfRemote("AttackRemote", combat, "Attack")
+		setIfRemote("ParryRemote", combat, "Parry")
+		setIfRemote("BlockRemote", combat, "Block")
+		setIfRemote("DeathblowRemote", combat, "Deathblow")
+		
+		-- Legacy remotes (kept for compatibility)
 		setIfRemote("M1Event", combat, "M1Event")
 		setIfRemote("GuardEvent", combat, "GuardEvent")
 		setIfRemote("SprintEvent", combat, "SprintEvent")
@@ -78,6 +90,10 @@ local function resolveRemotes()
 	SprintEvent = _G.SprintEvent
 	TargetLockEvent = _G.TargetLockEvent
 	InteractEvent = _G.InteractEvent
+	AttackRemote = _G.AttackRemote
+	ParryRemote = _G.ParryRemote
+	BlockRemote = _G.BlockRemote
+	DeathblowRemote = _G.DeathblowRemote
 
 	-- Emit concise warnings once per missing item to help debugging (non-spammy)
 	local function warnOnce(key, msg)
@@ -166,7 +182,8 @@ local function checkCooldown(key, dur)
 end
 
 -- =====================================================
--- M1 ATTACK (CLICK / HOLD)
+-- ATTACK (M1 CLICK)
+-- WHY: Attack is triggered by animation markers, but we can send intent here
 -- =====================================================
 local m1PressTime = nil
 
@@ -179,39 +196,80 @@ mouse.Button1Up:Connect(function()
 	if not m1PressTime then return end
 	if not checkCooldown("M1", 0.05) then return end
 
-	-- Only send if M1Event exists (safe, non-blocking)
-	if M1Event then
+	-- Use new Attack remote (animation markers will trigger actual attack)
+	-- This is kept for legacy compatibility - actual attack happens on HitStart marker
+	if AttackRemote then
+		safeFire(AttackRemote, {
+			timestamp = tick(),
+		})
+	elseif M1Event then
+		-- Fallback to legacy
 		safeFire(M1Event, {
 			press = m1PressTime,
 			release = tick(),
-			weapon = nil -- server decides equipped weapon
+			weapon = nil
 		})
-	else
-		-- Optional: debug print only once per session to avoid spam (resolveRemotes warns)
-		-- print("InputController: M1Event not ready; attack not sent.")
 	end
 
 	m1PressTime = nil
 end)
 
 -- =====================================================
--- GUARD / PARRY (M2 HOLD)
+-- BLOCK / PARRY (M2)
+-- WHY: Parry = quick tap, Block = hold
 -- =====================================================
+local m2PressTime = nil
+local m2HoldTimer = nil
+local PARRY_THRESHOLD = 0.2 -- If M2 held < 0.2s, it's a parry; else it's a block
+
 mouse.Button2Down:Connect(function()
 	if UserInputService:GetFocusedTextBox() then return end
-	if not checkCooldown("GuardStart", 0.05) then return end
-
-	if GuardEvent then
+	m2PressTime = tick()
+	
+	-- Start blocking immediately on press
+	if BlockRemote then
+		safeFire(BlockRemote, { action = "start" })
+	elseif GuardEvent then
 		safeFire(GuardEvent, { action = "start" })
 	end
+	
+	-- Set timer to distinguish parry from block
+	m2HoldTimer = task.delay(PARRY_THRESHOLD, function()
+		m2HoldTimer = nil -- After threshold, it's definitely a block
+	end)
 end)
 
 mouse.Button2Up:Connect(function()
+	if not m2PressTime then return end
 	if not checkCooldown("GuardStop", 0.05) then return end
-
-	if GuardEvent then
-		safeFire(GuardEvent, { action = "stop" })
+	
+	local holdDuration = tick() - m2PressTime
+	
+	-- If held for short time, it's a parry attempt
+	if holdDuration < PARRY_THRESHOLD and m2HoldTimer then
+		-- Cancel block and send parry intent
+		if BlockRemote then
+			safeFire(BlockRemote, { action = "stop" })
+		end
+		
+		if ParryRemote then
+			safeFire(ParryRemote)
+		end
+	else
+		-- It was a block, just stop blocking
+		if BlockRemote then
+			safeFire(BlockRemote, { action = "stop" })
+		elseif GuardEvent then
+			safeFire(GuardEvent, { action = "stop" })
+		end
 	end
+	
+	if m2HoldTimer then
+		task.cancel(m2HoldTimer)
+		m2HoldTimer = nil
+	end
+	
+	m2PressTime = nil
 end)
 
 -- =====================================================
@@ -235,6 +293,16 @@ UserInputService.InputBegan:Connect(function(input, gp)
 			if InteractEvent then
 				-- Fire minimal payload; server validates target and distance (do not trust client)
 				safeFire(InteractEvent, { target = mouse and mouse.Target or nil })
+			end
+			
+		elseif input.KeyCode == Enum.KeyCode.F then
+			-- Deathblow prompt (when target posture is broken)
+			if not checkCooldown("Deathblow", 0.5) then return end
+			if DeathblowRemote and mouse and mouse.Target then
+				local target = mouse.Target.Parent
+				if target and target:FindFirstChild("Humanoid") then
+					safeFire(DeathblowRemote, { target = target })
+				end
 			end
 
 		elseif input.KeyCode == Enum.KeyCode.Tab then

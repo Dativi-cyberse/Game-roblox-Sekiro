@@ -65,8 +65,15 @@ local Remotes = ensureFolder(Shared, "Remotes")
 -- ReplicatedStorage.Shared.Remotes.Combat
 local Combat = ensureFolder(Remotes, "Combat")
 
-ensureRemoteEvent(Combat, "M1Event")          -- light attack
-ensureRemoteEvent(Combat, "GuardEvent")       -- guard / hold block
+-- Core combat actions
+ensureRemoteEvent(Combat, "Attack")           -- Attack intent (from animation marker)
+ensureRemoteEvent(Combat, "Parry")            -- Parry intent (timing-based)
+ensureRemoteEvent(Combat, "Block")            -- Block start/stop (hold action)
+ensureRemoteEvent(Combat, "Deathblow")        -- Deathblow execution
+
+-- Legacy/Additional remotes (kept for compatibility)
+ensureRemoteEvent(Combat, "M1Event")          -- light attack (legacy)
+ensureRemoteEvent(Combat, "GuardEvent")       -- guard / hold block (legacy)
 ensureRemoteEvent(Combat, "ClashEvent")       -- sword clash / deflect
 ensureRemoteEvent(Combat, "SprintEvent")      -- sprint / dash
 ensureRemoteEvent(Combat, "TargetLockEvent")  -- lock-on target
