@@ -1,38 +1,44 @@
--- IdleState.lua
--- Idle state: Character is standing still, ready for actions
-
 local BaseState = require(script.Parent.BaseState)
 
 local IdleState = setmetatable({}, BaseState)
 IdleState.__index = IdleState
 
 function IdleState.new()
-	local self = setmetatable(BaseState.new("Idle"), IdleState)
-	self.allowedTransitions = {
-		["Move"] = true,
-		["Attack"] = true,
-		["Block"] = true,
-		["Parry"] = true,
-		["Dash"] = true,
-		["HitStun"] = true,
-		["Death"] = true,
-	}
-	return self
+	return setmetatable(BaseState.new("Idle"), IdleState)
 end
 
-function IdleState:Enter(prevState, context)
-	-- Ensure idle animation is playing
-	if context.AnimationController then
+function IdleState:Enter(context)
+	if context.weaponEquipped then
+		-- 🔒 KHÓA Animate để Roblox không ghi đè
+		if context.Animate then
+			context.Animate.Disabled = true
+		end
+
+		-- play combat idle
 		context.AnimationController:PlayIdle()
+	else
+		-- tay không → trả Animate lại cho Roblox
+		if context.Animate then
+			context.Animate.Disabled = false
+		end
+	end
+
+	-- combo reset nếu hết window
+	if context.comboTimer and tick() > context.comboTimer then
+		context.comboIndex = 1
+		context.comboTimer = nil
 	end
 end
 
-function IdleState:Exit(nextState, context)
-	-- Transitioning out of idle
-end
 
-function IdleState:Update(dt, context)
-	-- Check for input to transition to other states
+function IdleState:Update(_, context)
+	if not context.weaponEquipped then return end
+
+	local mag = context.Humanoid.MoveDirection.Magnitude
+	if mag > 0 and context.previousMoveMagnitude == 0 then
+		context.StateMachine:ChangeState(context.States.Move)
+	end
+	context.previousMoveMagnitude = mag
 end
 
 return IdleState

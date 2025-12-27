@@ -1,170 +1,115 @@
--- CombatClient.client.lua
-
 local Players = game:GetService("Players")
 local UserInputService = game:GetService("UserInputService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local player = Players.LocalPlayer
 local character = player.Character or player.CharacterAdded:Wait()
 
 print("CLIENT CHARACTER SCRIPT RUNNING")
 
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
-
-local StateMachine = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Modules"):WaitForChild("FSM"):WaitForChild("StateMachine"))
-print("StateMachine loaded")
-
-local AnimationController = require(script.Parent:WaitForChild("AnimationController"))
-print("AnimationController loaded")
-
+local StateMachine = require(script.Parent:WaitForChild("StateMachine"))
 local CombatController = require(script.Parent:WaitForChild("CombatController"))
-local DashController = require(script.Parent:WaitForChild("DashController"))
-local ParryController = require(script.Parent:WaitForChild("ParryController"))
-local PostureController = require(script.Parent:WaitForChild("PostureController"))
+local AnimationController = require(script.Parent:WaitForChild("AnimationController"))
 
--- FSM States
-local IdleState = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Modules"):WaitForChild("FSM"):WaitForChild("IdleState"))
-local AttackState = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Modules"):WaitForChild("FSM"):WaitForChild("AttackState"))
-local BlockState = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Modules"):WaitForChild("FSM"):WaitForChild("BlockState"))
-local DashState = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Modules"):WaitForChild("FSM"):WaitForChild("DashState"))
-local MoveState = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Modules"):WaitForChild("FSM"):WaitForChild("MoveState"))
-local ParryState = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Modules"):WaitForChild("FSM"):WaitForChild("ParryState"))
-local DeathState = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Modules"):WaitForChild("FSM"):WaitForChild("DeathState"))
-local HitStunState = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Modules"):WaitForChild("FSM"):WaitForChild("HitStunState"))
+local FSM = ReplicatedStorage.Shared.Modules.FSM
+local IdleState   = require(FSM.IdleState)
+local AttackState = require(FSM.AttackState)
+local BlockState  = require(FSM.BlockState)
+local MoveState   = require(FSM.MoveState)
 
-local stateMachine
-local animationController
-local combatController
-local dashController
-local parryController
-local postureController
-
-local inputBeganConnection
-local inputEndedConnection
-
-local function initializeModules(char)
+local function init(char)
 	local humanoid = char:WaitForChild("Humanoid")
 	local animator = humanoid:WaitForChild("Animator")
 
-	-- Destroy default Animate script to prevent conflicts
-	local animateScript = char:FindFirstChild("Animate")
-	if animateScript then
-		animateScript:Destroy()
-	end
+	local animate = char:FindFirstChild("Animate")
 
-	animationController = AnimationController.new(animator)
+	local animationController = AnimationController.new(animator)
 
-	-- FSM Context
 	local context = {
 		Humanoid = humanoid,
 		Animator = animator,
 		AnimationController = animationController,
-		comboQueued = false,
+		Animate = animate,
+
+		weaponEquipped = false,
+		comboIndex = 1,
+		comboTimer = nil,
+		previousMoveMagnitude = 0,
 	}
 
-	-- Create FSM states
-	local idleState = IdleState.new()
-	local attackState = AttackState.new()
-	local blockState = BlockState.new()
-	local dashState = DashState.new()
-	local moveState = MoveState.new()
-	local parryState = ParryState.new()
-	local deathState = DeathState.new()
-	local hitStunState = HitStunState.new()
+	local idle   = IdleState.new()
+	local attack = AttackState.new()
+	local block  = BlockState.new()
+	local move   = MoveState.new()
 
-	-- Initialize StateMachine with IdleState and context
-	stateMachine = StateMachine.new(idleState, context)
+	context.States = {
+		Idle = idle,
+		Attack = attack,
+		Block = block,
+		Move = move,
+	}
 
-	-- Register all states
-	stateMachine:RegisterState(idleState)
-	stateMachine:RegisterState(attackState)
-	stateMachine:RegisterState(blockState)
-	stateMachine:RegisterState(dashState)
-	stateMachine:RegisterState(moveState)
-	stateMachine:RegisterState(parryState)
-	stateMachine:RegisterState(deathState)
-	stateMachine:RegisterState(hitStunState)
+	local fsm = StateMachine.new(idle, context)
+	context.StateMachine = fsm
 
-	-- Set initial state to Idle (already set in constructor, but ensure)
-	stateMachine:ChangeState("Idle")
+	local combat = CombatController.new(fsm, context)
 
-	combatController = CombatController.new(stateMachine, context)
-	dashController = DashController.new()
-	parryController = ParryController.new()
-	postureController = PostureController.new()
+	-- Tool handling
+	char.ChildAdded:Connect(function(child)
+		if child:IsA("Tool") then
+			context.weaponEquipped = true
+			if animate then animate.Disabled = true end
+		end
+	end)
 
-	print("CombatClient initialized")
+	char.ChildRemoved:Connect(function(child)
+		if child:IsA("Tool") then
+			context.weaponEquipped = false
+			context.comboIndex = 1
+			context.comboTimer = nil
+
+			if animate then animate.Disabled = false end
+			animationController:StopAll()
+			fsm:ChangeState(idle)
+		end
+	end)
+
+	UserInputService.InputBegan:Connect(function(input, gp)
+		if gp then return end
+
+		if input.UserInputType == Enum.UserInputType.MouseButton1 then
+			print("CLIENT M1 PRESSED")
+			combat:HandleM1()
+		elseif input.KeyCode == Enum.KeyCode.F then
+			combat:SetGuarding(true)
+		end
+	end)
+
+	UserInputService.InputEnded:Connect(function(input)
+		if input.KeyCode == Enum.KeyCode.F then
+			combat:SetGuarding(false)
+		end
+	end)
+	char.ChildAdded:Connect(function(child)
+	if child:IsA("Tool") then
+		context.weaponEquipped = true
+
+		-- 🔥 FIX 1: STOP TẤT CẢ TRACK (kể cả Roblox Animate)
+		for _, track in ipairs(animator:GetPlayingAnimationTracks()) do
+			track:Stop(0)
+		end
+
+		-- 🔥 FIX 2: Disable Animate SAU KHI stop
+		if animate then
+			animate.Disabled = true
+		end
+
+		-- 🔥 FIX 3: reset FSM về Idle combat
+		context.AnimationController:StopAll()
+		context.StateMachine:ChangeState(context.States.Idle)
+	end
+end)
 end
 
-local function cleanupModules()
-	if inputBeganConnection then
-		inputBeganConnection:Disconnect()
-		inputBeganConnection = nil
-	end
-	if inputEndedConnection then
-		inputEndedConnection:Disconnect()
-		inputEndedConnection = nil
-	end
-
-	if animationController then
-		animationController:Cleanup()
-	end
-	if stateMachine then
-		stateMachine:Reset()
-	end
-	if combatController then
-		combatController:Cleanup()
-	end
-	if dashController then
-		dashController:Reset()
-	end
-	if parryController then
-		parryController:Reset()
-	end
-	if postureController then
-		postureController:Reset()
-	end
-end
-
-local function onInputBegan(input, gameProcessed)
-	if gameProcessed then return end
-
-	if input.UserInputType == Enum.UserInputType.MouseButton1 then
-		print("CLIENT M1 PRESSED")
-		combatController:HandleM1()
-	elseif input.KeyCode == Enum.KeyCode.F then
-		combatController:SetGuarding(true)
-	elseif input.KeyCode == Enum.KeyCode.LeftShift then
-		combatController:SetSprinting(true)
-	end
-end
-
-local function onInputEnded(input, gameProcessed)
-	if gameProcessed then return end
-
-	if input.KeyCode == Enum.KeyCode.F then
-		combatController:SetGuarding(false)
-	elseif input.KeyCode == Enum.KeyCode.LeftShift then
-		combatController:SetSprinting(false)
-	end
-end
-
-local function onCharacterAdded(newCharacter)
-	character = newCharacter
-	cleanupModules()
-	initializeModules(character)
-
-	inputBeganConnection = UserInputService.InputBegan:Connect(onInputBegan)
-	inputEndedConnection = UserInputService.InputEnded:Connect(onInputEnded)
-end
-
-local function onCharacterRemoving()
-	cleanupModules()
-end
-
-player.CharacterAdded:Connect(onCharacterAdded)
-player.CharacterRemoving:Connect(onCharacterRemoving)
-
-if character then
-	onCharacterAdded(character)
-end
+init(character)
 print("CombatClient setup complete")

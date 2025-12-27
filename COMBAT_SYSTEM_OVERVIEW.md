@@ -14,13 +14,14 @@
 
 ### Client Scripts
 - **InputController.client.lua**: Captures input and sends intents
-- **CombatAnimator.client.lua**: Plays animations and triggers hit detection via markers
+- **CombatClient.client.lua**: Handles input via FSM and manages animations through AnimationController
+- **AnimationController.lua**: Plays animations and handles marker events for hit detection
 
 ## Combat Flow
 
 ### 1. Attack Flow
-1. **Client**: Player presses M1 → `InputController` sends attack intent
-2. **Client**: `CombatAnimator` plays attack animation
+1. **Client**: Player presses M1 → `CombatClient` handles input via FSM
+2. **Client**: `AnimationController` plays attack animation
 3. **Client**: Animation reaches `HitStart` marker → fires `Attack` RemoteEvent
 4. **Server**: `CombatRemoteHandler` receives attack → calls `CombatService.ProcessAttack`
 5. **Server**: Creates temporary hitbox in front of attacker

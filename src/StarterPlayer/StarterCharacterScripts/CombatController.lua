@@ -1,76 +1,49 @@
--- CombatController.lua
--- FSM Adapter / Bridge
--- Purpose: keep legacy references alive, forward actions to FSM
--- NO combat logic, NO state, NO animation ownership
-
 local CombatController = {}
 CombatController.__index = CombatController
 
-function CombatController.new(stateMachine, context)
-	assert(stateMachine, "[CombatController] StateMachine is required")
-	assert(context, "[CombatController] Context is required")
-
-	local self = setmetatable({}, CombatController)
-	self.fsm = stateMachine
-	self.context = context
-	return self
+function CombatController.new(fsm, context)
+	return setmetatable({
+		fsm = fsm,
+		context = context,
+	}, CombatController)
 end
 
--- =========================
--- ATTACK (M1)
--- =========================
 function CombatController:HandleM1()
-	-- If already in Attack, queue combo
-	if self.fsm:GetState().name == "Attack" then
-		self.context.comboQueued = true
+	if not self.context.weaponEquipped then return end
+
+	local state = self.fsm:GetState()
+
+	-- nếu đang Attack → buffer input
+	if state == self.context.States.Attack then
+		state:HandleInput("M1", self.context)
 		return
 	end
-	-- Forward to FSM
-	self.fsm:ChangeState("Attack")
-end
 
--- =========================
--- GUARD / BLOCK
--- =========================
-function CombatController:SetGuarding(state)
-	if state then
-		self.fsm:ChangeState("Block")
-	else
-		self.fsm:ChangeState("Idle")
+	-- chỉ Idle mới bắt đầu Attack
+	if state == self.context.States.Idle then
+		self.context.comboIndex = 1
+		self.fsm:ChangeState(self.context.States.Attack)
 	end
 end
 
--- =========================
--- DASH
--- =========================
-function CombatController:Dash()
-	self.fsm:ChangeState("Dash")
-end
 
--- =========================
--- SPRINT (optional mapping)
--- =========================
-function CombatController:SetSprinting(state)
-	if state then
-		self.fsm:ChangeState("Move")
+
+function CombatController:SetGuarding(on)
+	if not self.context.weaponEquipped then return end
+
+	local cur = self.fsm:GetState()
+	local block = self.context.States.Block
+	local idle = self.context.States.Idle
+
+	if on then
+		if cur ~= block then
+			self.fsm:ChangeState(block)
+		end
 	else
-		self.fsm:ChangeState("Idle")
+		if cur == block then
+			self.fsm:ChangeState(idle)
+		end
 	end
-end
-
--- =========================
--- WEAPON EQUIP (NO LOGIC)
--- =========================
-function CombatController:SetWeaponEquipped(equipped)
-	-- FSM or higher-level system decides what to do
-	-- kept only for compatibility
-end
-
--- =========================
--- CLEANUP
--- =========================
-function CombatController:Cleanup()
-	-- nothing to clean
 end
 
 return CombatController

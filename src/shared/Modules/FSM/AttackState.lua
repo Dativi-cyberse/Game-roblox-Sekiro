@@ -1,63 +1,52 @@
--- AttackState.lua
--- Attack state: Character is performing an attack
-
 local BaseState = require(script.Parent.BaseState)
 
 local AttackState = setmetatable({}, BaseState)
 AttackState.__index = AttackState
 
+local COMBO_MAX = 4
+local HIT_TIME = 0.55
+local COMBO_TIMEOUT = 1.2
+
 function AttackState.new()
-	local self = setmetatable(BaseState.new("Attack"), AttackState)
-	self.allowedTransitions = {
-		["Idle"] = true,
-		["Move"] = true,
-		["HitStun"] = true,
-		["Death"] = true,
-		-- Dash can cancel attack if allowed
-		["Dash"] = true,
-	}
-	return self
+	return setmetatable(BaseState.new("Attack"), AttackState)
 end
 
-function AttackState:Enter(prevState, context)
-	-- Set timeout ONCE
-	self.timeout = tick() + 1.0 -- Assume 1 second attack duration
+function AttackState:Enter(context)
+	context.comboQueued = false
+	context.hitEndTime = tick() + HIT_TIME
+	context.lastInputTime = tick()
 
-	-- Start attack animation and logic
-	if context.AnimationController then
-		context.AnimationController:PlayAttack()
-	end
-	if context.Controllers and context.Controllers.CombatController then
-		context.Controllers.CombatController:StartAttack()
+	context.AnimationController:PlaySlash(context.comboIndex)
+end
+
+function AttackState:HandleInput(input, context)
+	if input == "M1" then
+		context.comboQueued = true
+		context.lastInputTime = tick()
 	end
 end
 
-function AttackState:Exit(nextState, context)
-	-- Stop attack if interrupted
-	if context.Controllers and context.Controllers.CombatController then
-		context.Controllers.CombatController:StopAttack()
-	end
-	-- Clear state-local timer
-	self.timeout = nil
-end
+function AttackState:Update(_, context)
+	-- chưa hết hit → chờ
+	if tick() < context.hitEndTime then return end
 
-function AttackState:Update(dt, context)
-	-- Check timeout
-	if tick() >= self.timeout then
-		-- Reset comboQueued BEFORE re-entering Attack
+	-- có buffer input → sang hit tiếp
+	if context.comboQueued and context.comboIndex < COMBO_MAX then
 		context.comboQueued = false
-		-- Transition to Idle or Move
-		if context.comboQueued then
-			-- If combo queued, stay in Attack (but since we reset it, it won't)
-			return
-		else
-			-- Transition to Idle
-			local stateMachine = context.StateMachine or context.fsm -- Assuming context has reference
-			if stateMachine then
-				stateMachine:ChangeState("Idle")
-			end
-		end
+		context.comboIndex += 1
+		context.hitEndTime = tick() + HIT_TIME
+		context.AnimationController:PlaySlash(context.comboIndex)
+		return
 	end
+
+	-- chờ combo window
+	if tick() - context.lastInputTime < COMBO_TIMEOUT then
+		return
+	end
+
+	-- combo kết thúc thật sự
+	context.comboIndex = 1
+	context.StateMachine:ChangeState(context.States.Idle)
 end
 
 return AttackState
