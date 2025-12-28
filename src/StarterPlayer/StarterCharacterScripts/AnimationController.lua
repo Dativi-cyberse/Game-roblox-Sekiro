@@ -12,6 +12,12 @@ local ANIMATION_IDS = {
 	Idle   = "117428425939221",
 	Sprint = "125710871592563",
 	Guard  = "110454192036754",
+	
+	RDash  = "133650397070060",
+	LDash  = "72307653613351",
+	FDash1 = "115223618743226",
+	FDash2 = "108189754217336",
+	BDash  = "81293025442865",
 
 	Slash1 = "131822813695057",
 	Slash2 = "122160066715450",
@@ -34,8 +40,10 @@ function AnimationController.new(animator)
 	self.animationPlayedSignal = Instance.new("BindableEvent")
 	self.animationEndedSignal = Instance.new("BindableEvent")
 
-	self:_LoadAnimations()
+	-- 🔥 FORWARD DASH ORDER (FDash1 -> FDash2 -> repeat)
+	self._forwardDashIndex = 1
 
+	self:_LoadAnimations()
 	return self
 end
 
@@ -58,7 +66,7 @@ function AnimationController:_LoadAnimations()
 		end)
 
 		if success and track then
-			-- Priority (VERY IMPORTANT)
+			-- Priority
 			if name == "Idle" then
 				track.Priority = Enum.AnimationPriority.Idle
 			elseif name == "Sprint" then
@@ -67,26 +75,20 @@ function AnimationController:_LoadAnimations()
 				track.Priority = Enum.AnimationPriority.Action
 			end
 
-			-- Loop settings
 			track.Looped = (name == "Idle" or name == "Guard" or name == "Sprint")
-
 			self.animationRegistry[name] = track
 		else
-			warn("[AnimationController] Failed to load animation:", name, "with ID:", id)
+			warn("[AnimationController] Failed to load animation:", name)
 		end
 	end
 
-	-- Correct count (dictionary-safe)
 	local count = 0
-	for _ in pairs(self.animationRegistry) do
-		count += 1
-	end
-
+	for _ in pairs(self.animationRegistry) do count += 1 end
 	print("[AnimationController] Loaded", count, "animations")
 end
 
 -- =====================================================
--- PUBLIC PLAY METHODS
+-- BASIC STATES
 -- =====================================================
 
 function AnimationController:PlayIdle()
@@ -101,24 +103,74 @@ function AnimationController:PlayGuard()
 	return self:_PlayAnimation("Guard", 0.1)
 end
 
+-- =====================================================
+-- DASH (ORDERED, NOT RANDOM)
+-- =====================================================
+
+function AnimationController:PlayDash(direction)
+	-- direction: Vector3 in LOCAL SPACE
+
+	local forward = Vector3.new(0, 0, -1)
+	local right   = Vector3.new(1, 0, 0)
+
+	local fDot = direction and direction:Dot(forward) or 1
+	local rDot = direction and direction:Dot(right) or 0
+
+	-- ===== FORWARD DASH (FDash1 -> FDash2) =====
+	if fDot > 0.6 then
+		local dashName
+		if self._forwardDashIndex == 1 then
+			dashName = "FDash1"
+			self._forwardDashIndex = 2
+		else
+			dashName = "FDash2"
+			self._forwardDashIndex = 1
+		end
+
+		local track = self:_PlayAnimation(dashName, 0.05)
+		if track then
+			track:AdjustSpeed(0.8) -- kéo dài animation
+		end
+		return track
+	end
+
+	-- ===== BACK DASH =====
+	if fDot < -0.6 then
+		self._forwardDashIndex = 1
+		local track = self:_PlayAnimation("BDash", 0.05)
+		if track then track:AdjustSpeed(0.8) end
+		return track
+	end
+
+	-- ===== RIGHT DASH =====
+	if rDot > 0 then
+		self._forwardDashIndex = 1
+		local track = self:_PlayAnimation("RDash", 0.05)
+		if track then track:AdjustSpeed(0.8) end
+		return track
+	end
+
+	-- ===== LEFT DASH =====
+	self._forwardDashIndex = 1
+	local track = self:_PlayAnimation("LDash", 0.05)
+	if track then track:AdjustSpeed(0.8) end
+	return track
+end
+
+function AnimationController:StopDash()
+	self:StopAll(nil, 0.05)
+end
+
+-- =====================================================
+-- ATTACK
+-- =====================================================
+
 function AnimationController:PlaySlash(index)
-	local name = "Slash" .. index
-	return self:_PlayAnimation(name, 0.05)
+	return self:_PlayAnimation("Slash" .. index, 0.05)
 end
 
 function AnimationController:PlayAttack()
-	-- Map to first slash animation
 	return self:PlaySlash(1)
-end
-
-function AnimationController:PlayDeath()
-	-- Placeholder for death animation
-	warn("[AnimationController] PlayDeath not implemented")
-end
-
-function AnimationController:PlayHitStun()
-	-- Placeholder for hit stun animation
-	warn("[AnimationController] PlayHitStun not implemented")
 end
 
 -- =====================================================
@@ -127,14 +179,12 @@ end
 
 function AnimationController:_PlayAnimation(slotName, fadeTime)
 	fadeTime = fadeTime or 0.1
-
 	local track = self.animationRegistry[slotName]
 	if not track then
 		warn("[AnimationController] Missing animation:", slotName)
 		return nil
 	end
 
-	-- Stop previous track
 	if self.currentTrack and self.currentTrack ~= track then
 		self.currentTrack:Stop(fadeTime)
 	end
@@ -145,7 +195,6 @@ function AnimationController:_PlayAnimation(slotName, fadeTime)
 	self:_ConnectMarkers(track, slotName)
 	self.animationPlayedSignal:Fire(slotName, track)
 
-	-- IMPORTANT: use Stopped (not Ended)
 	if not track.Looped then
 		local conn
 		conn = track.Stopped:Connect(function()
@@ -173,32 +222,25 @@ function AnimationController:_ConnectMarkers(track, slotName)
 
 	self.markerConnections[slotName] = {}
 
-	local markerNames = { "Hit", "ParryWindow", "ComboAllow" }
-
-	for _, markerName in ipairs(markerNames) do
+	for _, markerName in ipairs({ "Hit", "ParryWindow", "ComboAllow" }) do
 		local ok, signal = pcall(function()
 			return track:GetMarkerReachedSignal(markerName)
 		end)
-
 		if ok and signal then
-			local conn = signal:Connect(function()
-				-- marker hook (handled elsewhere)
-			end)
-			table.insert(self.markerConnections[slotName], conn)
+			table.insert(self.markerConnections[slotName], signal:Connect(function() end))
 		end
 	end
 end
 
 -- =====================================================
--- STATE / UTIL
+-- UTIL
 -- =====================================================
 
 function AnimationController:StopAll(except, fadeTime)
 	fadeTime = fadeTime or 0.1
-
 	if self.currentTrack then
-		local currentName = self:_GetTrackName(self.currentTrack)
-		if not except or currentName ~= except then
+		local name = self:_GetTrackName(self.currentTrack)
+		if not except or name ~= except then
 			self.currentTrack:Stop(fadeTime)
 			self.currentTrack = nil
 		end
@@ -207,9 +249,7 @@ end
 
 function AnimationController:_GetTrackName(track)
 	for name, t in pairs(self.animationRegistry) do
-		if t == track then
-			return name
-		end
+		if t == track then return name end
 	end
 	return nil
 end
@@ -220,25 +260,6 @@ function AnimationController:IsPlaying(slotName)
 		return t and t.IsPlaying
 	end
 	return self.currentTrack ~= nil and self.currentTrack.IsPlaying
-end
-
-function AnimationController:OnAnimationPlayed(cb)
-	return self.animationPlayedSignal.Event:Connect(cb)
-end
-
-function AnimationController:OnAnimationEnded(cb)
-	return self.animationEndedSignal.Event:Connect(cb)
-end
-
-function AnimationController:Cleanup()
-	for _, list in pairs(self.markerConnections) do
-		for _, c in ipairs(list) do
-			pcall(function() c:Disconnect() end)
-		end
-	end
-	self.markerConnections = {}
-	self:StopAll(nil, 0)
-	self.animationRegistry = {}
 end
 
 function AnimationController:Reset()

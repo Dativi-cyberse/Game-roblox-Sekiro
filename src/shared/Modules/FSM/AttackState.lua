@@ -5,32 +5,41 @@ AttackState.__index = AttackState
 
 local COMBO_MAX = 4
 local HIT_TIME = 0.55
-local COMBO_TIMEOUT = 1.2
 
 function AttackState.new()
 	return setmetatable(BaseState.new("Attack"), AttackState)
 end
 
+-- =====================
+-- ENTER
+-- =====================
 function AttackState:Enter(context)
 	context.comboQueued = false
 	context.hitEndTime = tick() + HIT_TIME
-	context.lastInputTime = tick()
 
+	-- Play current slash
 	context.AnimationController:PlaySlash(context.comboIndex)
 end
 
+-- =====================
+-- INPUT
+-- =====================
 function AttackState:HandleInput(input, context)
 	if input == "M1" then
 		context.comboQueued = true
-		context.lastInputTime = tick()
 	end
 end
 
+-- =====================
+-- UPDATE
+-- =====================
 function AttackState:Update(_, context)
-	-- chưa hết hit → chờ
-	if tick() < context.hitEndTime then return end
+	-- Chưa hết animation hit → chờ
+	if tick() < context.hitEndTime then
+		return
+	end
 
-	-- có buffer input → sang hit tiếp
+	-- Có buffer input & còn combo → đánh hit tiếp
 	if context.comboQueued and context.comboIndex < COMBO_MAX then
 		context.comboQueued = false
 		context.comboIndex += 1
@@ -39,14 +48,17 @@ function AttackState:Update(_, context)
 		return
 	end
 
-	-- chờ combo window
-	if tick() - context.lastInputTime < COMBO_TIMEOUT then
-		return
-	end
-
-	-- combo kết thúc thật sự
+	-- 🔥 KẾT THÚC ATTACK → LUÔN VỀ IDLE
 	context.comboIndex = 1
 	context.StateMachine:ChangeState(context.States.Idle)
+end
+
+-- =====================
+-- EXIT
+-- =====================
+function AttackState:Exit(context)
+	-- đảm bảo reset buffer
+	context.comboQueued = false
 end
 
 return AttackState

@@ -3,24 +3,33 @@ local BaseState = require(script.Parent.BaseState)
 local MoveState = setmetatable({}, BaseState)
 MoveState.__index = MoveState
 
+local STOP_THRESHOLD = 0.05
+
 function MoveState.new()
 	return setmetatable(BaseState.new("Move"), MoveState)
 end
 
 function MoveState:Enter(context)
-	if not context.weaponEquipped then return end
-	context.AnimationController:PlaySprint()
+	-- CHỈ play combat animation nếu đang cầm vũ khí
+	if context.weaponEquipped and context.AnimationController then
+		context.AnimationController:PlaySprint()
+	end
 end
 
 function MoveState:Update(_, context)
-	if not context.weaponEquipped then return end
+	local humanoid = context.Humanoid
+	if not humanoid then return end
 
-	local mag = context.Humanoid.MoveDirection.Magnitude
-	if mag == 0 and context.previousMoveMagnitude > 0 then
+	local mag = humanoid.MoveDirection.Magnitude
+
+	-- 🔥 CHỈ THOÁT MOVE KHI THỰC SỰ DỪNG
+	if mag <= STOP_THRESHOLD then
 		context.StateMachine:ChangeState(context.States.Idle)
 	end
-	context.previousMoveMagnitude = mag
+end
+
+function MoveState:Exit(context)
+	-- KHÔNG stop animation ở đây
 end
 
 return MoveState
- 

@@ -177,5 +177,67 @@ function CombatService.TickSprint(playerState, dt)
     if not isEntity(playerState) then return false end
     return Sprint.Tick(playerState, dt)
 end
+-- =====================================================
+-- POSTURE / STAGGER HELPERS (FOR DEATHBLOW)
+-- =====================================================
+function CombatService.IsPostureBroken(entity)
+    if not isEntity(entity) then return false end
+
+    -- Posture-based system
+    if entity.Posture ~= nil then
+        return entity.Posture <= 0
+    end
+
+    -- Shield / Guard fallback
+    if entity.Shield ~= nil then
+        return entity.Shield <= 0
+    end
+    if entity.Guard ~= nil then
+        return entity.Guard <= 0
+    end
+
+    -- Time-based stagger fallback
+    if entity._staggerUntil and entity._staggerUntil > now() then
+        return true
+    end
+
+    return false
+end
+-- =====================================================
+-- DEATHBLOW (SEKIRO-STYLE EXECUTION)
+-- =====================================================
+function CombatService.PerformDeathblow(attackerEntity, targetEntity)
+    if not isEntity(attackerEntity) or not isEntity(targetEntity) then
+        return false
+    end
+
+    -- Target must be posture-broken or staggered
+    if not CombatService.IsPostureBroken(targetEntity) then
+        return false
+    end
+
+    -- Boss / multi-phase handling
+    if type(targetEntity.Lives) == "number" and targetEntity.Lives > 1 then
+        targetEntity.Lives -= 1
+
+        -- Reset posture & stagger for next phase
+        targetEntity.Posture = Constants.POSTURE_MAX
+        targetEntity._staggerUntil = now() + 0.8
+
+        return {
+            outcome = "DEATHBLOW_PHASE",
+            remainingLives = targetEntity.Lives
+        }
+    end
+
+    -- Normal enemy: instant kill
+    targetEntity.Health = 0
+    targetEntity._isDead = true
+    targetEntity._deathblowBy = attackerEntity
+
+    return {
+        outcome = "DEATHBLOW_KILL"
+    }
+end
 
 return CombatService

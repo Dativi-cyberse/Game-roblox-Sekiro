@@ -59,5 +59,10 @@ function StateMachine:Destroy()
 		self._conn = nil
 	end
 end
+function StateMachine:Update(dt)
+	if self.currentState and self.currentState.Update then
+		self.currentState:Update(dt, self.context)
+	end
+end
 
 return StateMachine
