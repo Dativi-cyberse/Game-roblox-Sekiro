@@ -92,9 +92,9 @@ local function onMarkerHit(markerName)
     if markerName == "Hit" then
         local safeIndex = math.clamp(comboIndex, 1, COMBO_MAX)
         -- Notify server for hit processing; server must validate
-        pcall(function()
-            m1Remote:FireServer(safeIndex)
-        end)
+        -- pcall(function()
+        --     m1Remote:FireServer(safeIndex)
+        -- end) -- HOTFIX: marker-based attack is illegal (caused phantom damage)
     end
 end
 

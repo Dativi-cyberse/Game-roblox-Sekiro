@@ -73,7 +73,7 @@ end
 local function onMarkerHit(markerName)
 	if markerName == "Hit" then
 		local safeIndex = math.clamp(comboIndex, 1, COMBO_MAX)
-		m1Remote:FireServer(safeIndex)
+		-- m1Remote:FireServer(safeIndex) -- HOTFIX: marker-based attack is illegal (caused phantom damage)
 	end
 end
 

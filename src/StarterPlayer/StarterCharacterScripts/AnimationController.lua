@@ -19,10 +19,10 @@ local ANIMATION_IDS = {
 	FDash2 = "108189754217336",
 	BDash  = "81293025442865",
 
-	Slash1 = "131822813695057",
-	Slash2 = "122160066715450",
-	Slash3 = "124228947503532",
-	Slash4 = "111207431242662",
+	Slash1 = "107432081428264",
+	Slash2 = "75814337439061",
+	Slash3 = "116183119194533",
+	Slash4 = "107471212849510",
 }
 
 -- =====================================================
@@ -129,7 +129,7 @@ function AnimationController:PlayDash(direction)
 
 		local track = self:_PlayAnimation(dashName, 0.05)
 		if track then
-			track:AdjustSpeed(0.8) -- kéo dài animation
+			track:AdjustSpeed(0.5) -- kéo dài animation
 		end
 		return track
 	end
@@ -138,7 +138,7 @@ function AnimationController:PlayDash(direction)
 	if fDot < -0.6 then
 		self._forwardDashIndex = 1
 		local track = self:_PlayAnimation("BDash", 0.05)
-		if track then track:AdjustSpeed(0.8) end
+		if track then track:AdjustSpeed(0.5) end
 		return track
 	end
 
@@ -146,14 +146,14 @@ function AnimationController:PlayDash(direction)
 	if rDot > 0 then
 		self._forwardDashIndex = 1
 		local track = self:_PlayAnimation("RDash", 0.05)
-		if track then track:AdjustSpeed(0.8) end
+		if track then track:AdjustSpeed(0.5) end
 		return track
 	end
 
 	-- ===== LEFT DASH =====
 	self._forwardDashIndex = 1
 	local track = self:_PlayAnimation("LDash", 0.05)
-	if track then track:AdjustSpeed(0.8) end
+	if track then track:AdjustSpeed(0.5) end
 	return track
 end
 
@@ -166,7 +166,7 @@ end
 -- =====================================================
 
 function AnimationController:PlaySlash(index)
-	return self:_PlayAnimation("Slash" .. index, 0.05)
+	return self:_PlayAnimation("Slash" .. index, 0.1)
 end
 
 function AnimationController:PlayAttack()

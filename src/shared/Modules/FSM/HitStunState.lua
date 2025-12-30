@@ -38,6 +38,9 @@ function HitStunState:Update(dt, context)
 	if context.Controllers and context.Controllers.CombatController then
 		if context.Controllers.CombatController:IsHitStunFinished() then
 			-- Transition back to Idle or Move
+			if context.StateMachine and context.States and context.States.Idle then -- HOTFIX: Guard transition
+				context.StateMachine:ChangeState(context.States.Idle) -- HOTFIX: Transition to Idle when hit stun finishes
+			end
 		end
 	end
 end

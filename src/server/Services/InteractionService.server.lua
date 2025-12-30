@@ -1,9 +1,12 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Remotes = Shared:WaitForChild("Remotes")
+local Interaction = Remotes:WaitForChild("Interaction")
+local InteractEvent = Interaction:WaitForChild("InteractEvent")
+    
 local Players = game:GetService("Players")
 
-local remotes = ReplicatedStorage:WaitForChild("Remotes")
-local interaction = remotes:WaitForChild("Interaction")
-local InteractEvent = interaction:FindFirstChild("InteractEvent")
 
 local InteractionService = {}
 

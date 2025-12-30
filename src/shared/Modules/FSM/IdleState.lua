@@ -22,12 +22,6 @@ function IdleState:Enter(context)
 			context.Animate.Disabled = false
 		end
 	end
-
-	-- combo reset nếu hết window
-	if context.comboTimer and tick() > context.comboTimer then
-		context.comboIndex = 1
-		context.comboTimer = nil
-	end
 end
 
 

@@ -8,8 +8,26 @@ function CombatController.new(fsm, context)
 	}, CombatController)
 end
 
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
 function CombatController:HandleM1()
 	if not self.context.weaponEquipped then return end
+
+	-- PHASE 2: Check for Deathblow opportunity before normal attack.
+	-- ASSUMPTION: A client-side targeting controller exists and is accessible via context.
+	local lockedTarget
+	if self.context.TargetingController and self.context.TargetingController.GetLockedTarget then
+		lockedTarget = self.context.TargetingController:GetLockedTarget()
+	end
+
+	if lockedTarget and lockedTarget:GetAttribute("PostureBroken") == true then
+		local DeathblowRemote = ReplicatedStorage.Shared.Remotes.Combat:FindFirstChild("Deathblow")
+		if DeathblowRemote then
+			DeathblowRemote:FireServer({ target = lockedTarget })
+			-- Do not proceed with normal attack; the server will handle the deathblow.
+			return
+		end
+	end
 
 	local state = self.fsm:GetState()
 

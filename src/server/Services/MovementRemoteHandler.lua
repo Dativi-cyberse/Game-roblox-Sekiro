@@ -1,3 +1,15 @@
+local ServerScriptService = game:GetService("ServerScriptService")
+local Services = ServerScriptService:WaitForChild("Services")
+
+local function getCombatService()
+    return require(Services:WaitForChild("CombatService"))
+end
+
+-- ✅ FIX DUY NHẤT (THÊM DÒNG NÀY)
+local CombatService = getCombatService()
+
+print("[MovementRemoteHandler] running")
+
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Shared = ReplicatedStorage:FindFirstChild("Shared")
 if not Shared then return end
@@ -5,9 +17,6 @@ local Remotes = Shared:FindFirstChild("Remotes")
 if not Remotes then return end
 local CombatRemotes = Remotes:FindFirstChild("Combat")
 if not CombatRemotes then return end
-
-local CombatService = require(script.Parent.CombatService)
-
 local SprintRemote = CombatRemotes:FindFirstChild("SprintEvent")
 if not SprintRemote then return end
 

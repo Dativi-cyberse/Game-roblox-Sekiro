@@ -1,9 +1,18 @@
 -- CombatServer.server.lua
 -- Server-side combat bootstrap (safe, idempotent)
 
-print("CombatServer running")
+-- CombatServer.server.lua
+print("[CombatServer] running")
+local ServerScriptService = game:GetService("ServerScriptService")
 
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local AI = ServerScriptService:WaitForChild("AI")
+local DummyEnemy = require(AI:WaitForChild("DummyEnemy"))
+
+DummyEnemy.Start()
+
+
+-- ===== PHẦN CODE COMBAT SERVER CŨ CỦA BẠN Ở DƯỚI =====
+
 
 -- =====================================================
 -- UTILITIES

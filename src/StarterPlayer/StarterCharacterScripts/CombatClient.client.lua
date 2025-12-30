@@ -5,6 +5,7 @@ local Players = game:GetService("Players")
 local UserInputService = game:GetService("UserInputService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
+local M1Remote = ReplicatedStorage.Shared.Remotes.Combat:FindFirstChild("M1Event") -- HOTFIX
 
 local player = Players.LocalPlayer
 local character = player.Character or player.CharacterAdded:Wait()
@@ -46,6 +47,8 @@ local function init(char)
 
 	-- Controllers
 	local animationController = AnimationController.new(animator)
+	_G.__AnimationController = animationController
+
 	local dashController = DashController.new(root)
 
 	-- =====================
@@ -103,6 +106,7 @@ local function init(char)
 	char.ChildAdded:Connect(function(child)
 		if child:IsA("Tool") then
 			context.weaponEquipped = true
+			context.weapon = child -- HOTFIX
 
 			-- Stop all current animations
 			for _, track in ipairs(animator:GetPlayingAnimationTracks()) do
@@ -132,6 +136,7 @@ local function init(char)
 	char.ChildRemoved:Connect(function(child)
 		if child:IsA("Tool") then
 			context.weaponEquipped = false
+			context.weapon = nil -- HOTFIX
 			context.comboIndex = 1
 
 			animationController:StopAll()
@@ -178,7 +183,23 @@ local function init(char)
 
 		-- M1 = ATTACK
 		if input.UserInputType == Enum.UserInputType.MouseButton1 then
-			combat:HandleM1()
+			local currentState = context.StateMachine.currentState
+
+if currentState and currentState.name == "Attack" then
+	currentState:HandleInput("M1", context)
+else
+	combat:HandleM1()
+end
+
+			local currentTarget = nil -- HOTFIX
+			if context.TargetingController and context.TargetingController.GetLockedTarget then -- HOTFIX
+				currentTarget = context.TargetingController:GetLockedTarget() -- HOTFIX
+			end -- HOTFIX
+			-- M1Remote:FireServer({ -- HOTFIX
+			-- 	isAttack = true, -- HOTFIX
+			-- 	target = currentTarget, -- HOTFIX
+			-- 	weapon = context.weapon -- HOTFIX
+			-- }) -- HOTFIX
 			return
 		end
 

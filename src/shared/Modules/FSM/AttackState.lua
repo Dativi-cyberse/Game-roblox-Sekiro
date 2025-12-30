@@ -14,11 +14,15 @@ end
 -- ENTER
 -- =====================
 function AttackState:Enter(context)
+	-- chỉ reset buffer, KHÔNG reset comboIndex ở đây
 	context.comboQueued = false
 	context.hitEndTime = tick() + HIT_TIME
 
-	-- Play current slash
-	context.AnimationController:PlaySlash(context.comboIndex)
+	-- clamp combo index
+	local combo = math.clamp(context.comboIndex or 1, 1, COMBO_MAX)
+
+	-- play slash tương ứng
+	context.AnimationController:PlaySlash(combo)
 end
 
 -- =====================
@@ -34,21 +38,29 @@ end
 -- UPDATE
 -- =====================
 function AttackState:Update(_, context)
-	-- Chưa hết animation hit → chờ
+	-- chờ hết hit window
 	if tick() < context.hitEndTime then
 		return
 	end
 
-	-- Có buffer input & còn combo → đánh hit tiếp
-	if context.comboQueued and context.comboIndex < COMBO_MAX then
+	-- nếu có buffer input → nối combo
+	if context.comboQueued then
 		context.comboQueued = false
-		context.comboIndex += 1
+
+		if context.comboIndex < COMBO_MAX then
+			context.comboIndex += 1
+		else
+			-- vòng lại slash1 nếu muốn (Sekiro-style)
+			context.comboIndex = 1
+		end
+
 		context.hitEndTime = tick() + HIT_TIME
+
 		context.AnimationController:PlaySlash(context.comboIndex)
 		return
 	end
 
-	-- 🔥 KẾT THÚC ATTACK → LUÔN VỀ IDLE
+	-- không buffer nữa → thoát Attack
 	context.comboIndex = 1
 	context.StateMachine:ChangeState(context.States.Idle)
 end
@@ -57,7 +69,6 @@ end
 -- EXIT
 -- =====================
 function AttackState:Exit(context)
-	-- đảm bảo reset buffer
 	context.comboQueued = false
 end
 
