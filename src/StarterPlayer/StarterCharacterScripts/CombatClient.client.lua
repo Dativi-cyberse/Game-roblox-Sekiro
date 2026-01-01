@@ -1,11 +1,10 @@
 -- CombatClient.client.lua
--- Client-side combat controller (FSM + input + animation)
+-- FINAL – MUGEN STYLE (SAFE PATH VERSION)
 
 local Players = game:GetService("Players")
 local UserInputService = game:GetService("UserInputService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
-local M1Remote = ReplicatedStorage.Shared.Remotes.Combat:FindFirstChild("M1Event") -- HOTFIX
 
 local player = Players.LocalPlayer
 local character = player.Character or player.CharacterAdded:Wait()
@@ -13,23 +12,32 @@ local character = player.Character or player.CharacterAdded:Wait()
 print("CLIENT CHARACTER SCRIPT RUNNING")
 
 -- =====================
--- MODULES
+-- SHARED FSM PATH
 -- =====================
-local StateMachine = require(script.Parent:WaitForChild("StateMachine"))
-local CombatController = require(script.Parent:WaitForChild("CombatController"))
-local AnimationController = require(script.Parent:WaitForChild("AnimationController"))
-local DashController = require(script.Parent:WaitForChild("DashController"))
-
-local FSMFolder = ReplicatedStorage.Shared.Modules.FSM
-local IdleState   = require(FSMFolder.IdleState)
-local AttackState = require(FSMFolder.AttackState)
-local BlockState  = require(FSMFolder.BlockState)
-local MoveState   = require(FSMFolder.MoveState)
-local DashState   = require(FSMFolder.DashState)
+local FSMFolder = ReplicatedStorage
+	:WaitForChild("Shared")
+	:WaitForChild("Modules")
+	:WaitForChild("FSM")
 
 -- =====================
--- SPRINT CONFIG
+-- CHARACTER MODULES
 -- =====================
+local CombatController     = require(character:WaitForChild("CombatController"))
+local AnimationController  = require(character:WaitForChild("AnimationController"))
+local DashController       = require(character:WaitForChild("DashController"))
+local CombatHitHandler     = require(character:WaitForChild("CombatHitHandler"))
+
+-- =====================
+-- FSM CORE + STATES
+-- =====================
+local StateMachine = require(FSMFolder:WaitForChild("StateMachine"))
+
+local IdleState   = require(FSMFolder:WaitForChild("IdleState"))
+local AttackState = require(FSMFolder:WaitForChild("AttackState"))
+local BlockState  = require(FSMFolder:WaitForChild("BlockState"))
+local MoveState   = require(FSMFolder:WaitForChild("MoveState"))
+local DashState   = require(FSMFolder:WaitForChild("DashState"))
+
 local BASE_SPEED = 16
 local SPRINT_SPEED = 24
 
@@ -43,119 +51,69 @@ local function init(char)
 	local animate = char:FindFirstChild("Animate")
 
 	humanoid.WalkSpeed = BASE_SPEED
-	local sprinting = false
 
-	-- Controllers
 	local animationController = AnimationController.new(animator)
-	_G.__AnimationController = animationController
-
 	local dashController = DashController.new(root)
 
 	-- =====================
-	-- FSM CONTEXT
+	-- CONTEXT (KHÔNG RÚT GỌN)
 	-- =====================
 	local context = {
 		Humanoid = humanoid,
 		Animator = animator,
 		Root = root,
 		Animate = animate,
+
 		AnimationController = animationController,
 
 		weaponEquipped = false,
 		comboIndex = 1,
+		comboQueued = false,
+		sprintRequested = false,
 
 		Controllers = {
 			DashController = dashController,
 		}
 	}
 
-	-- =====================
-	-- STATES
-	-- =====================
-	local idle   = IdleState.new()
-	local attack = AttackState.new()
-	local block  = BlockState.new()
-	local move   = MoveState.new()
-	local dash   = DashState.new()
-
 	context.States = {
-		Idle = idle,
-		Attack = attack,
-		Block = block,
-		Move = move,
-		Dash = dash,
+		Idle   = IdleState.new(),
+		Attack = AttackState.new(),
+		Block  = BlockState.new(),
+		Move   = MoveState.new(),
+		Dash   = DashState.new(),
 	}
 
-	local fsm = StateMachine.new(idle, context)
+	local fsm = StateMachine.new(context.States.Idle, context)
 	context.StateMachine = fsm
 
-	local combat = CombatController.new(fsm, context)
+	local combatController = CombatController.new(fsm, context)
+	context.Controllers.CombatController = combatController
 
-	-- =====================================================
-	-- 🔥 FSM UPDATE LOOP (QUAN TRỌNG NHẤT – TRƯỚC ĐÂY BỊ THIẾU)
-	-- =====================================================
+	CombatHitHandler.new(context, animationController)
+
 	RunService.RenderStepped:Connect(function(dt)
-		if context.StateMachine then
-			context.StateMachine:Update(dt)
-		end
+		fsm:Update(dt)
 	end)
 
 	-- =====================
-	-- TOOL EQUIP
+	-- EQUIP / UNEQUIP
 	-- =====================
 	char.ChildAdded:Connect(function(child)
 		if child:IsA("Tool") then
 			context.weaponEquipped = true
-			context.weapon = child -- HOTFIX
-
-			-- Stop all current animations
-			for _, track in ipairs(animator:GetPlayingAnimationTracks()) do
-				track:Stop(0)
-			end
-
-			-- Disable Roblox Animate
-			if animate then
-				animate.Disabled = true
-			end
-
+			if animate then animate.Disabled = true end
 			animationController:StopAll()
-
-			-- Decide correct state based on movement
-			if humanoid.MoveDirection.Magnitude > 0.05 then
-				fsm:ChangeState(context.States.Move)
-			else
-				animationController:PlayIdle()
-				fsm:ChangeState(context.States.Idle)
-			end
+			fsm:ChangeState(context.States.Idle)
 		end
 	end)
 
-	-- =====================
-	-- TOOL UNEQUIP
-	-- =====================
 	char.ChildRemoved:Connect(function(child)
 		if child:IsA("Tool") then
 			context.weaponEquipped = false
-			context.weapon = nil -- HOTFIX
-			context.comboIndex = 1
-
+			context.comboQueued = false
+			if animate then animate.Disabled = false end
 			animationController:StopAll()
-
-			-- 🔥 HARD RESET ROBLOX ANIMATE (CHẮC CHẮN HẾT KẸT)
-			if animate then
-				local clone = animate:Clone()
-				animate:Destroy()
-				clone.Parent = char
-				animate = clone
-				context.Animate = clone
-			end
-
-			-- Force movement refresh
-			local dir = humanoid.MoveDirection
-			humanoid:Move(Vector3.zero, true)
-			task.wait()
-			humanoid:Move(dir, true)
-
 			fsm:ChangeState(context.States.Idle)
 		end
 	end)
@@ -166,62 +124,35 @@ local function init(char)
 	UserInputService.InputBegan:Connect(function(input, gp)
 		if gp then return end
 
-		-- CTRL = SPRINT
 		if input.KeyCode == Enum.KeyCode.LeftControl then
-			sprinting = true
-			humanoid.WalkSpeed = SPRINT_SPEED
+			context.sprintRequested = true
 			return
 		end
 
-		-- Q = DASH
-		if input.KeyCode == Enum.KeyCode.Q then
-			if context.weaponEquipped then
-				fsm:ChangeState(context.States.Dash)
-			end
+		if input.KeyCode == Enum.KeyCode.Q and context.weaponEquipped then
+			fsm:ChangeState(context.States.Dash)
 			return
 		end
 
-		-- M1 = ATTACK
 		if input.UserInputType == Enum.UserInputType.MouseButton1 then
-			local currentState = context.StateMachine.currentState
-
-if currentState and currentState.name == "Attack" then
-	currentState:HandleInput("M1", context)
-else
-	combat:HandleM1()
-end
-
-			local currentTarget = nil -- HOTFIX
-			if context.TargetingController and context.TargetingController.GetLockedTarget then -- HOTFIX
-				currentTarget = context.TargetingController:GetLockedTarget() -- HOTFIX
-			end -- HOTFIX
-			-- M1Remote:FireServer({ -- HOTFIX
-			-- 	isAttack = true, -- HOTFIX
-			-- 	target = currentTarget, -- HOTFIX
-			-- 	weapon = context.weapon -- HOTFIX
-			-- }) -- HOTFIX
+			fsm:HandleInput("M1")
+			combatController:HandleM1()
 			return
 		end
 
-		-- M2 = BLOCK
 		if input.UserInputType == Enum.UserInputType.MouseButton2 then
-			combat:SetGuarding(true)
+			combatController:SetGuarding(true)
 			return
 		end
 	end)
 
 	UserInputService.InputEnded:Connect(function(input)
-		-- CTRL RELEASE
 		if input.KeyCode == Enum.KeyCode.LeftControl then
-			sprinting = false
-			humanoid.WalkSpeed = BASE_SPEED
-			return
+			context.sprintRequested = false
 		end
 
-		-- M2 RELEASE
 		if input.UserInputType == Enum.UserInputType.MouseButton2 then
-			combat:SetGuarding(false)
-			return
+			combatController:SetGuarding(false)
 		end
 	end)
 end

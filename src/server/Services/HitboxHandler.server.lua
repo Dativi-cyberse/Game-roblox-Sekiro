@@ -81,6 +81,11 @@ AttackRemote.OnServerEvent:Connect(function(player, payload)
 	if type(payload) ~= "table" then return end
 
 	local weaponData = payload.weapon or {}
+	
+	-- [FIX] Pass comboIndex to CombatService for knockback logic
+	if payload.comboIndex then
+		weaponData.comboIndex = payload.comboIndex
+	end
 
 	-- =========================
 	-- RESOLVE ATTACKER
@@ -93,8 +98,12 @@ AttackRemote.OnServerEvent:Connect(function(player, payload)
 
 	-- 🔥 CRITICAL FIX:
 	-- Record attack intent time BEFORE hit validation
-	-- This enables server-authoritative timing without relying on FSM sync
 	attackerEntity._lastAttackIntentTime = os.clock()
+
+	-- [MUGEN SAFE CHANGE] Sync combo index from client to server entity
+	if type(payload.comboIndex) == "number" then
+		attackerEntity._currentComboIndex = payload.comboIndex
+	end
 
 	-- =========================
 	-- RESOLVE TARGET

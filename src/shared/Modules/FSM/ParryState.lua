@@ -32,12 +32,12 @@ function ParryState:Exit(nextState, context)
 end
 
 function ParryState:Update(dt, context)
-	-- Check if parry window has expired
 	if context.Controllers and context.Controllers.CombatController then
 		if context.Controllers.CombatController:IsParryExpired() then
-			-- Transition back to Idle
+			context.StateMachine:ChangeState(context.States.Idle)
 		end
 	end
 end
+
 
 return ParryState

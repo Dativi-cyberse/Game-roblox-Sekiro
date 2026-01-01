@@ -1,12 +1,23 @@
 -- HitboxService.lua
 -- Server-side validation for hitbox checks
+-- SOURCE OF TRUTH for hit validation (range / angle / timing)
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Modules = Shared:WaitForChild("Modules")
+
+local WeaponData = require(Modules.Weapons.WeaponData)
 
 local HitboxService = {}
 
 local MAX_ANGLE_DOT = 0.5
 local MIN_COMBO_INTERVAL = 0.12
 
-function HitboxService.ValidateHit(attackerEntity, targetEntity, weaponData)
+-- =====================================================
+-- VALIDATE HIT
+-- =====================================================
+function HitboxService.ValidateHit(attackerEntity, targetEntity, attackData)
 	if not attackerEntity or not targetEntity then
 		return false, "Invalid entities"
 	end
@@ -17,14 +28,19 @@ function HitboxService.ValidateHit(attackerEntity, targetEntity, weaponData)
 	-- COMBO MULTI-HIT GATE
 	-- =========================
 	local comboIndex = attackerEntity._currentComboIndex or 0
+	local lastComboIndex = attackerEntity._lastComboIndex
 	local lastHitTime = attackerEntity._lastComboHitTime or 0
 
-	if attackerEntity._lastComboIndex == comboIndex then
+	-- [MUGEN SAFE CHANGE]
+	-- Block spam of SAME combo hit
+	-- Allow natural progression: 1 -> 2 -> 3 -> 4
+	if lastComboIndex == comboIndex then
 		if now - lastHitTime < MIN_COMBO_INTERVAL then
 			return false, "Combo hit cooldown"
 		end
 	end
 
+	-- record combo hit info AFTER validation
 	attackerEntity._lastComboIndex = comboIndex
 	attackerEntity._lastComboHitTime = now
 
@@ -46,7 +62,7 @@ function HitboxService.ValidateHit(attackerEntity, targetEntity, weaponData)
 	end
 
 	-- =========================
-	-- DISTANCE
+	-- ROOT PARTS
 	-- =========================
 	local aRoot = attackerEntity.RootPart
 	local tRoot = targetEntity.RootPart
@@ -54,7 +70,18 @@ function HitboxService.ValidateHit(attackerEntity, targetEntity, weaponData)
 		return false, "Missing root parts"
 	end
 
-	local range = (weaponData and weaponData.Range) or 6
+	-- =========================
+	-- WEAPON DATA (SERVER AUTHORITATIVE)
+	-- =========================
+	local weaponId = attackData and attackData.weaponId
+	local weaponConfig = weaponId and WeaponData.Get(weaponId)
+
+	-- fallback range if weapon missing
+	local range = (weaponConfig and weaponConfig.Range) or 6
+
+	-- =========================
+	-- DISTANCE
+	-- =========================
 	if (aRoot.Position - tRoot.Position).Magnitude > (range + 2) then
 		return false, "Out of range"
 	end

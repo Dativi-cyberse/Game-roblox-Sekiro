@@ -1,38 +1,55 @@
-local BaseState = require(script.Parent.BaseState)
+-- IdleState.lua
+-- Safe idle state with weapon awareness
 
+local BaseState = require(script.Parent.BaseState)
 local IdleState = setmetatable({}, BaseState)
 IdleState.__index = IdleState
 
 function IdleState.new()
-	return setmetatable(BaseState.new("Idle"), IdleState)
+	local self = setmetatable(BaseState.new("Idle"), IdleState)
+
+	self.allowedTransitions = {
+		Move = true,
+		Attack = true,
+		Block = true,
+		Dash = true,
+		Parry = true,
+		HitStun = true,
+		Death = true,
+	}
+
+	return self
 end
 
-function IdleState:Enter(context)
-	if context.weaponEquipped then
-		-- 🔒 KHÓA Animate để Roblox không ghi đè
-		if context.Animate then
-			context.Animate.Disabled = true
-		end
+function IdleState:Enter(_, context)
+	if not context then return end
 
-		-- play combat idle
+	-- No weapon → let Roblox Animate run
+	if not context.weaponEquipped then
+		return
+	end
+
+	if context.AnimationController then
 		context.AnimationController:PlayIdle()
-	else
-		-- tay không → trả Animate lại cho Roblox
-		if context.Animate then
-			context.Animate.Disabled = false
-		end
 	end
 end
 
+function IdleState:Update(dt, context)
+	if context.attackRequested then
+		context.StateMachine:ChangeState(context.States.Attack)
+		return
+	end
 
-function IdleState:Update(_, context)
-	if not context.weaponEquipped then return end
+	if context.blockRequested then
+		context.StateMachine:ChangeState(context.States.Block)
+		return
+	end
 
-	local mag = context.Humanoid.MoveDirection.Magnitude
-	if mag > 0 and context.previousMoveMagnitude == 0 then
+	if context.Humanoid and context.Humanoid.MoveDirection.Magnitude > 0.1 then
 		context.StateMachine:ChangeState(context.States.Move)
+		return
 	end
-	context.previousMoveMagnitude = mag
 end
+function IdleState:Exit() end
 
 return IdleState

@@ -33,14 +33,18 @@ function AnimationController.new(animator)
 	local self = setmetatable({}, AnimationController)
 
 	self.animator = animator
-	self.currentTrack = nil
+
+	-- [MUGEN SAFE CHANGE]
+	self.currentBaseTrack = nil
+	self.currentAttackTrack = nil
+	self.attackStoppedConnection = nil
+
 	self.animationRegistry = {}
 	self.markerConnections = {}
 
 	self.animationPlayedSignal = Instance.new("BindableEvent")
 	self.animationEndedSignal = Instance.new("BindableEvent")
 
-	-- 🔥 FORWARD DASH ORDER (FDash1 -> FDash2 -> repeat)
 	self._forwardDashIndex = 1
 
 	self:_LoadAnimations()
@@ -48,7 +52,7 @@ function AnimationController.new(animator)
 end
 
 -- =====================================================
--- LOAD ANIMATIONS (ONCE)
+-- LOAD ANIMATIONS
 -- =====================================================
 
 function AnimationController:_LoadAnimations()
@@ -66,7 +70,6 @@ function AnimationController:_LoadAnimations()
 		end)
 
 		if success and track then
-			-- Priority
 			if name == "Idle" then
 				track.Priority = Enum.AnimationPriority.Idle
 			elseif name == "Sprint" then
@@ -77,14 +80,8 @@ function AnimationController:_LoadAnimations()
 
 			track.Looped = (name == "Idle" or name == "Guard" or name == "Sprint")
 			self.animationRegistry[name] = track
-		else
-			warn("[AnimationController] Failed to load animation:", name)
 		end
 	end
-
-	local count = 0
-	for _ in pairs(self.animationRegistry) do count += 1 end
-	print("[AnimationController] Loaded", count, "animations")
 end
 
 -- =====================================================
@@ -92,73 +89,41 @@ end
 -- =====================================================
 
 function AnimationController:PlayIdle()
-	return self:_PlayAnimation("Idle", 0.2)
+	return self:_PlayBase("Idle", 0.2)
 end
 
 function AnimationController:PlaySprint()
-	return self:_PlayAnimation("Sprint", 0.15)
+	return self:_PlayBase("Sprint", 0.15)
 end
 
 function AnimationController:PlayGuard()
-	return self:_PlayAnimation("Guard", 0.1)
+	return self:_PlayBase("Guard", 0.1)
 end
 
 -- =====================================================
--- DASH (ORDERED, NOT RANDOM)
+-- DASH
 -- =====================================================
 
 function AnimationController:PlayDash(direction)
-	-- direction: Vector3 in LOCAL SPACE
-
 	local forward = Vector3.new(0, 0, -1)
 	local right   = Vector3.new(1, 0, 0)
 
 	local fDot = direction and direction:Dot(forward) or 1
 	local rDot = direction and direction:Dot(right) or 0
 
-	-- ===== FORWARD DASH (FDash1 -> FDash2) =====
+	local dashName
 	if fDot > 0.6 then
-		local dashName
-		if self._forwardDashIndex == 1 then
-			dashName = "FDash1"
-			self._forwardDashIndex = 2
-		else
-			dashName = "FDash2"
-			self._forwardDashIndex = 1
-		end
-
-		local track = self:_PlayAnimation(dashName, 0.05)
-		if track then
-			track:AdjustSpeed(0.5) -- kéo dài animation
-		end
-		return track
+		dashName = (self._forwardDashIndex == 1) and "FDash1" or "FDash2"
+		self._forwardDashIndex = (self._forwardDashIndex == 1) and 2 or 1
+	elseif fDot < -0.6 then
+		dashName = "BDash"
+	elseif rDot > 0 then
+		dashName = "RDash"
+	else
+		dashName = "LDash"
 	end
 
-	-- ===== BACK DASH =====
-	if fDot < -0.6 then
-		self._forwardDashIndex = 1
-		local track = self:_PlayAnimation("BDash", 0.05)
-		if track then track:AdjustSpeed(0.5) end
-		return track
-	end
-
-	-- ===== RIGHT DASH =====
-	if rDot > 0 then
-		self._forwardDashIndex = 1
-		local track = self:_PlayAnimation("RDash", 0.05)
-		if track then track:AdjustSpeed(0.5) end
-		return track
-	end
-
-	-- ===== LEFT DASH =====
-	self._forwardDashIndex = 1
-	local track = self:_PlayAnimation("LDash", 0.05)
-	if track then track:AdjustSpeed(0.5) end
-	return track
-end
-
-function AnimationController:StopDash()
-	self:StopAll(nil, 0.05)
+	return self:_PlayBase(dashName, 0.05)
 end
 
 -- =====================================================
@@ -166,45 +131,61 @@ end
 -- =====================================================
 
 function AnimationController:PlaySlash(index)
-	return self:_PlayAnimation("Slash" .. index, 0.1)
-end
-
-function AnimationController:PlayAttack()
-	return self:PlaySlash(1)
+	return self:_PlayAttack("Slash" .. index, 0.05)
 end
 
 -- =====================================================
 -- CORE PLAY LOGIC
 -- =====================================================
 
-function AnimationController:_PlayAnimation(slotName, fadeTime)
-	fadeTime = fadeTime or 0.1
+-- [MUGEN SAFE CHANGE] Base animations (Idle / Sprint / Dash)
+function AnimationController:_PlayBase(slotName, fadeTime)
 	local track = self.animationRegistry[slotName]
-	if not track then
-		warn("[AnimationController] Missing animation:", slotName)
-		return nil
-	end
+	if not track then return end
 
-	if self.currentTrack and self.currentTrack ~= track then
-		self.currentTrack:Stop(fadeTime)
+	if self.currentBaseTrack and self.currentBaseTrack ~= track then
+		self.currentBaseTrack:Stop(fadeTime)
 	end
 
 	track:Play(fadeTime)
-	self.currentTrack = track
+	self.currentBaseTrack = track
+
+	self.animationPlayedSignal:Fire(slotName, track)
+	return track
+end
+
+-- [MUGEN SAFE CHANGE] Attack animations (Slash 1–4)
+function AnimationController:_PlayAttack(slotName, fadeTime)
+	local track = self.animationRegistry[slotName]
+	if not track then
+		warn("[AnimationController] Missing attack animation:", slotName)
+		return
+	end
+
+	-- [FIX] Clean up previous connection FIRST to prevent leaks
+	if self.attackStoppedConnection then
+		self.attackStoppedConnection:Disconnect()
+		self.attackStoppedConnection = nil
+	end
+
+	-- [FIX] Always stop current attack to ensure clean restart (even if same track)
+	if self.currentAttackTrack then
+		self.currentAttackTrack:Stop(fadeTime)
+		self.currentAttackTrack = nil
+	end
+
+	track:Play(fadeTime)
+	self.currentAttackTrack = track
 
 	self:_ConnectMarkers(track, slotName)
 	self.animationPlayedSignal:Fire(slotName, track)
 
-	if not track.Looped then
-		local conn
-		conn = track.Stopped:Connect(function()
-			if self.currentTrack == track then
-				self.currentTrack = nil
-			end
-			self.animationEndedSignal:Fire(slotName)
-			if conn then conn:Disconnect() end
-		end)
-	end
+	self.attackStoppedConnection = track.Stopped:Connect(function()
+		if self.currentAttackTrack == track then
+			self.currentAttackTrack = nil
+		end
+		self.animationEndedSignal:Fire(slotName)
+	end)
 
 	return track
 end
@@ -236,34 +217,51 @@ end
 -- UTIL
 -- =====================================================
 
+function AnimationController:Reset()
+	if self.currentAttackTrack then
+		self.currentAttackTrack:Stop(0)
+		self.currentAttackTrack = nil
+	end
+	if self.attackStoppedConnection then
+		self.attackStoppedConnection:Disconnect()
+		self.attackStoppedConnection = nil
+	end
+	if self.currentBaseTrack then
+		self.currentBaseTrack:Stop(0)
+		self.currentBaseTrack = nil
+	end
+end
+-- [MUGEN SAFE CHANGE] Compatibility stub
+-- CombatClient vẫn gọi StopAll(), nên cần giữ hàm này
 function AnimationController:StopAll(except, fadeTime)
 	fadeTime = fadeTime or 0.1
-	if self.currentTrack then
-		local name = self:_GetTrackName(self.currentTrack)
-		if not except or name ~= except then
-			self.currentTrack:Stop(fadeTime)
-			self.currentTrack = nil
-		end
+
+	if self.currentAttackTrack then
+		self.currentAttackTrack:Stop(fadeTime)
+		self.currentAttackTrack = nil
+	end
+
+	-- [FIX] Ensure connection is cleaned up
+	if self.attackStoppedConnection then
+		self.attackStoppedConnection:Disconnect()
+		self.attackStoppedConnection = nil
+	end
+
+	if self.currentBaseTrack then
+		self.currentBaseTrack:Stop(fadeTime)
+		self.currentBaseTrack = nil
 	end
 end
+-- ===============================
+-- MUGEN FSM COMPATIBILITY
+-- ===============================
 
-function AnimationController:_GetTrackName(track)
-	for name, t in pairs(self.animationRegistry) do
-		if t == track then return name end
-	end
-	return nil
+function AnimationController:PlayAttack(comboIndex)
+	return self:PlaySlash(comboIndex)
 end
 
-function AnimationController:IsPlaying(slotName)
-	if slotName then
-		local t = self.animationRegistry[slotName]
-		return t and t.IsPlaying
-	end
-	return self.currentTrack ~= nil and self.currentTrack.IsPlaying
-end
-
-function AnimationController:Reset()
-	self:StopAll(nil, 0)
+function AnimationController:PlayMove()
+	return self:PlaySprint()
 end
 
 return AnimationController

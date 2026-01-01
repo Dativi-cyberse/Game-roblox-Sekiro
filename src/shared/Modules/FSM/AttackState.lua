@@ -1,75 +1,81 @@
-local BaseState = require(script.Parent.BaseState)
+-- AttackState.lua
+-- Mugen-style combo attack state
 
+local BaseState = require(script.Parent.BaseState)
 local AttackState = setmetatable({}, BaseState)
 AttackState.__index = AttackState
 
-local COMBO_MAX = 4
-local HIT_TIME = 0.55
+local ATTACK_DURATION = 0.45
+local COMBO_BUFFER = 0.4
+local MAX_COMBO = 4
+local LUNGE_SPEEDS = { 50, 30, 30, 70 } -- Strong opener, light mids, heavy finisher
 
 function AttackState.new()
-	return setmetatable(BaseState.new("Attack"), AttackState)
+	local self = setmetatable(BaseState.new("Attack"), AttackState)
+
+	self.allowedTransitions = {
+		Attack = true,
+		Idle = true,
+		HitStun = true,
+		Death = true,
+	}
+
+	return self
 end
 
--- =====================
--- ENTER
--- =====================
-function AttackState:Enter(context)
-	-- chỉ reset buffer, KHÔNG reset comboIndex ở đây
+function AttackState:Enter(prevState, context)
+	local now = os.clock()
+
+	self.endTime = now + ATTACK_DURATION
+	self.bufferTime = self.endTime - COMBO_BUFFER
+
 	context.comboQueued = false
-	context.hitEndTime = tick() + HIT_TIME
+	context.attackRequested = false -- Fix: Clear intent on entry to prevent immediate re-trigger
 
-	-- clamp combo index
-	local combo = math.clamp(context.comboIndex or 1, 1, COMBO_MAX)
+	if prevState and prevState.name == "Attack" then
+		context.comboIndex = math.min((context.comboIndex or 1) + 1, MAX_COMBO)
+	else
+		context.comboIndex = 1
+	end
 
-	-- play slash tương ứng
-	context.AnimationController:PlaySlash(combo)
+	if context.AnimationController then
+		context.AnimationController:PlayAttack(context.comboIndex)
+	end
+
+	-- [MUGEN MOVEMENT] Forward Lunge Impulse
+	if context.Root then
+		local speed = LUNGE_SPEEDS[context.comboIndex] or 30
+		local forward = context.Root.CFrame.LookVector
+		-- Apply horizontal velocity, preserve vertical (gravity)
+		local currentY = context.Root.AssemblyLinearVelocity.Y
+		context.Root.AssemblyLinearVelocity = Vector3.new(forward.X * speed, currentY, forward.Z * speed)
+	end
 end
 
--- =====================
--- INPUT
--- =====================
 function AttackState:HandleInput(input, context)
 	if input == "M1" then
-		context.comboQueued = true
-	end
-end
-
--- =====================
--- UPDATE
--- =====================
-function AttackState:Update(_, context)
-	-- chờ hết hit window
-	if tick() < context.hitEndTime then
-		return
-	end
-
-	-- nếu có buffer input → nối combo
-	if context.comboQueued then
-		context.comboQueued = false
-
-		if context.comboIndex < COMBO_MAX then
-			context.comboIndex += 1
-		else
-			-- vòng lại slash1 nếu muốn (Sekiro-style)
-			context.comboIndex = 1
+		if os.clock() >= self.bufferTime then
+			context.comboQueued = true
 		end
+	end
+end
 
-		context.hitEndTime = tick() + HIT_TIME
-
-		context.AnimationController:PlaySlash(context.comboIndex)
+function AttackState:Update(_, context)
+	if os.clock() < self.endTime then
 		return
 	end
 
-	-- không buffer nữa → thoát Attack
-	context.comboIndex = 1
-	context.StateMachine:ChangeState(context.States.Idle)
+	if context.comboQueued and context.comboIndex < MAX_COMBO then
+		context.comboQueued = false
+		context.StateMachine:ChangeState(AttackState.new())
+		return -- Fix: Prevent fallthrough
+	else
+		context.comboIndex = 1
+		context.StateMachine:ChangeState(context.States.Idle)
+		return -- Fix: Prevent fallthrough
+	end
 end
 
--- =====================
--- EXIT
--- =====================
-function AttackState:Exit(context)
-	context.comboQueued = false
-end
+function AttackState:Exit() end
 
 return AttackState

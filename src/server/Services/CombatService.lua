@@ -207,6 +207,38 @@ function CombatService.ProcessAttack(attackerEntity, targetEntity, weaponTable)
 		targetEntity._staggerUntil = math.max(targetEntity._staggerUntil or 0, now() + 1.0)
 	end
 
+	-- =========================
+	-- FINISHER KNOCKBACK (COMBO-BASED)
+	-- =========================
+	-- [MUGEN SAFE CHANGE]
+	-- Finisher is determined by comboIndex from client (hit 4)
+	if weaponTable
+		and weaponTable.comboIndex == 4
+		and targetEntity.RootPart
+		and attackerEntity.RootPart then
+
+		local dir = targetEntity.RootPart.Position - attackerEntity.RootPart.Position
+		if dir.Magnitude < 0.1 then
+			dir = attackerEntity.RootPart.CFrame.LookVector
+		end
+		
+		dir = Vector3.new(dir.X, 0, dir.Z).Unit
+		local knockbackDir = (dir + Vector3.new(0, 0.25, 0)).Unit
+
+		-- [FIX] Ensure physics apply and AI doesn't snap back
+		targetEntity.RootPart.Anchored = false
+		targetEntity.RootPart.AssemblyLinearVelocity = knockbackDir * 90
+
+		if targetEntity.Humanoid then
+			targetEntity.Humanoid.PlatformStand = true
+			task.delay(0.5, function()
+				if targetEntity.Humanoid and targetEntity.Humanoid.Health > 0 then
+					targetEntity.Humanoid.PlatformStand = false
+				end
+			end)
+		end
+	end
+
 	attackerEntity._lastAttackTime = attackTime
 
 	print(
