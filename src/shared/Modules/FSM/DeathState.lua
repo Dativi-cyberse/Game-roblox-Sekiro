@@ -16,7 +16,7 @@ end
 
 function DeathState:Enter(prevState, context)
 	-- Play death animation
-	if context.AnimationController then
+	if context.AnimationController and context.AnimationController.PlayDeath then
 		context.AnimationController:PlayDeath()
 	end
 	-- Disable all controls

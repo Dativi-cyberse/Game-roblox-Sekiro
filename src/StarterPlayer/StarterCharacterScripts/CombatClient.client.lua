@@ -112,8 +112,9 @@ local function init(char)
 		if child:IsA("Tool") then
 			context.weaponEquipped = false
 			context.comboQueued = false
-			if animate then animate.Disabled = false end
+			humanoid.WalkSpeed = BASE_SPEED
 			animationController:StopAll()
+			if animate then animate.Disabled = false end
 			fsm:ChangeState(context.States.Idle)
 		end
 	end)

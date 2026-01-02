@@ -1,47 +1,60 @@
 -- d:\Game-roblox-Sekiro\src\server\AI\SmartDummyController.server.lua
 -- SmartDummyController.server.lua
--- Extends Dummy AI behavior by injecting high-priority intents (Guard/Retreat)
--- based on Posture and Stagger state.
--- This file does NOT modify existing AI files.
+-- MAIN AI DRIVER
+-- Instantiates DummyEnemy wrappers and drives their FSM Update loop.
 
 local RunService = game:GetService("RunService")
+local ServerScriptService = game:GetService("ServerScriptService")
+local Workspace = game:GetService("Workspace")
 
-local function updateSmartAI()
-    if not _G.NPC_ENTITIES then return end
+local AI = ServerScriptService:WaitForChild("AI")
+local DummyEnemy = require(AI:WaitForChild("DummyEnemy"))
 
-    local now = os.clock()
+local activeNPCs = {} -- [Model] = DummyEnemyInstance
 
-    for model, entity in pairs(_G.NPC_ENTITIES) do
-        if entity.State == "Dead" or entity._isDead then continue end
+-- =====================================================
+-- NPC MANAGEMENT
+-- =====================================================
 
-        -- 1. Stagger Handling
-        -- If staggered, force intent to nil to prevent actions
-        if entity._staggerUntil and entity._staggerUntil > now then
-            entity.Intent = nil
-            entity.State = "Staggered"
-            continue
-        end
-
-        -- 2. Low Posture Survival
-        -- If posture is critical (< 30%), force Guarding to recover
-        if entity.Posture and entity.MaxPosture then
-            local ratio = entity.Posture / entity.MaxPosture
-            if ratio < 0.3 and entity.State ~= "Attacking" then
-                -- Override Brain decision
-                entity.Intent = "Guard"
-            end
-        end
-
-        -- 3. Posture Broken State
-        -- If posture is 0, ensure entity is vulnerable
-        if entity.Posture <= 0 then
-            entity._isGuardBroken = true
-            entity.State = "Staggered"
-            entity.Intent = nil
-        end
-    end
+local function onNpcAdded(model)
+	if activeNPCs[model] then return end
+	
+	-- Simple check for valid NPC candidates
+	if model:IsA("Model") and (string.find(model.Name, "Dummy") or string.find(model.Name, "Sekiro")) then
+		local humanoid = model:FindFirstChild("Humanoid")
+		local root = model:FindFirstChild("HumanoidRootPart")
+		
+		if humanoid and root then
+			print("[SmartDummyController] Attaching AI to:", model.Name)
+			activeNPCs[model] = DummyEnemy.new(model)
+		end
+	end
 end
 
-RunService.Heartbeat:Connect(updateSmartAI)
+local function onNpcRemoved(model)
+	if activeNPCs[model] then
+		print("[SmartDummyController] Detaching AI from:", model.Name)
+		activeNPCs[model] = nil
+	end
+end
 
-print("[SmartDummyController] AI Extension Running")
+-- 1. Scan existing
+for _, child in ipairs(Workspace:GetChildren()) do
+	onNpcAdded(child)
+end
+
+-- 2. Listen for new
+Workspace.ChildAdded:Connect(onNpcAdded)
+Workspace.ChildRemoved:Connect(onNpcRemoved)
+
+RunService.Heartbeat:Connect(function(dt)
+	for model, npc in pairs(activeNPCs) do
+		if model.Parent then
+			npc:Update(dt)
+		else
+			activeNPCs[model] = nil
+		end
+	end
+end)
+
+print("[SmartDummyController] AI Driver Running")

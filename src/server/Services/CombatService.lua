@@ -115,14 +115,56 @@ end
 -- MAIN ATTACK ENTRY
 -- =========================
 function CombatService.ProcessAttack(attackerEntity, targetEntity, weaponTable)
-	print("[CombatService] ProcessAttack", attackerEntity, "->", targetEntity)
+	-- [DEBUG] Log IDs
+	local aId = attackerEntity and (attackerEntity.EntityId or attackerEntity.Model.Name) or "nil"
+	local tId = targetEntity and (targetEntity.EntityId or targetEntity.Model.Name) or "nil"
+	local atkId = weaponTable and weaponTable.attackId or "nil"
+	
+	-- print(string.format("[CombatService] ProcessAttack: %s -> %s [AttackID: %s]", aId, tId, atkId))
 
-	if not isEntity(attackerEntity) or not isEntity(targetEntity) then
-		error("ProcessAttack requires attacker and target entity tables")
+	-- [MUGEN FIX] Strict Entity Validation
+	if not isEntity(attackerEntity) or not isEntity(targetEntity) or not attackerEntity.RootPart or not targetEntity.RootPart then
+		return { outcome = "ERROR", reason = "Invalid entities" }
 	end
 
 	local weapon = WeaponData.Normalize(weaponTable or {})
 	local attackTime = now()
+
+	-- [FIX] Prevent multi-hit damage using Attack ID
+	local attackId = weaponTable.attackId
+	if attackId then
+		attackerEntity._processedAttacks = attackerEntity._processedAttacks or {}
+		local key = attackId .. "_" .. (targetEntity.EntityId or tostring(targetEntity.Model))
+		if attackerEntity._processedAttacks[key] then
+			return { outcome = "IGNORED", reason = "Duplicate hit" }
+		end
+		attackerEntity._processedAttacks[key] = true
+		
+		-- Cleanup old attack IDs periodically (simple approach)
+		task.delay(5, function()
+			if attackerEntity._processedAttacks then
+				attackerEntity._processedAttacks[key] = nil
+			end
+		end)
+	end
+
+	-- [FIX] Range Check (Server Authoritative)
+	-- Even if state-based, ensure we aren't hitting across the map
+	local dist = (attackerEntity.RootPart.Position - targetEntity.RootPart.Position).Magnitude
+	if dist > 12 then -- Generous hit range for boss
+		return { outcome = "MISS", reason = "Out of range" }
+	end
+
+	-- [FIX] NPC Damage Scaling vs Player
+	if attackerEntity.IsNPC and targetEntity.EntityType == "PLAYER" then
+		-- Scale down NPC damage to be fair (30% of raw damage)
+		weapon.Damage = math.floor((weapon.Damage or 10) * 0.3)
+	end
+
+	-- [FIX] Ensure damage is not zeroed out by missing data
+	if not weapon.Damage or weapon.Damage <= 0 then
+		weapon.Damage = 5 -- Fallback damage
+	end
 
 	-- =========================
 	-- PARRY CHECK
@@ -230,10 +272,14 @@ function CombatService.ProcessAttack(attackerEntity, targetEntity, weaponTable)
 		targetEntity.RootPart.AssemblyLinearVelocity = knockbackDir * 90
 
 		if targetEntity.Humanoid then
+			-- [NPC FIX] Force state change to prevent NavMesh snapping
+			targetEntity.Humanoid:ChangeState(Enum.HumanoidStateType.Physics)
 			targetEntity.Humanoid.PlatformStand = true
+			
 			task.delay(0.5, function()
 				if targetEntity.Humanoid and targetEntity.Humanoid.Health > 0 then
 					targetEntity.Humanoid.PlatformStand = false
+					targetEntity.Humanoid:ChangeState(Enum.HumanoidStateType.GettingUp)
 				end
 			end)
 		end

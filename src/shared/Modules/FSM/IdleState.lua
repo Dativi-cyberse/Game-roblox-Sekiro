@@ -45,7 +45,20 @@ function IdleState:Update(dt, context)
 		return
 	end
 
+	if context.parryRequested then
+		context.StateMachine:ChangeState(context.States.Parry)
+		return
+	end
+
 	if context.Humanoid and context.Humanoid.MoveDirection.Magnitude > 0.1 then
+		if context.weaponEquipped then
+			context.StateMachine:ChangeState(context.States.Move)
+			return
+		end
+	end
+
+	-- [NPC FIX] Transition to Move if target exists
+	if context.isNPC and context.moveTarget then
 		context.StateMachine:ChangeState(context.States.Move)
 		return
 	end

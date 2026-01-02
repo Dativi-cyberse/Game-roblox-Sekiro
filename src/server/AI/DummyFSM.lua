@@ -1,6 +1,8 @@
 -- DummyFSM.lua
 -- Time-based Finite State Machine for the Dummy.
 -- Enforces state duration and transitions.
+-- NOTE: This is a legacy/fallback FSM. 
+-- The active NPC system uses the Shared StateMachine via DummyEnemy.lua.
 
 local DummyFSM = {}
 DummyFSM.__index = DummyFSM

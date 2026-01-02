@@ -86,6 +86,11 @@ AttackRemote.OnServerEvent:Connect(function(player, payload)
 	if payload.comboIndex then
 		weaponData.comboIndex = payload.comboIndex
 	end
+	
+	-- [FIX] Pass Attack ID to prevent multi-hits
+	if payload.attackId then
+		weaponData.attackId = payload.attackId
+	end
 
 	-- =========================
 	-- RESOLVE ATTACKER
@@ -118,9 +123,10 @@ AttackRemote.OnServerEvent:Connect(function(player, payload)
 	-- VALIDATE ENTITY TYPE
 	-- =========================
 
-	if targetEntity.EntityType ~= "NPC"
-		and targetEntity.EntityType ~= "PLAYER"
-		and not targetEntity.IsNPC then
+	-- [MUGEN FIX] Only process Player attacks via Remote
+	-- NPCs use direct calls from AttackState
+	if attackerEntity.IsNPC then
+		-- Ignore NPC attacks coming through remotes (shouldn't happen, but safety first)
 		return
 	end
 
