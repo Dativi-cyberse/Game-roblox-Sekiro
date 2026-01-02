@@ -25,6 +25,8 @@ end
 
 -- Internal: Create Entity
 local function createEntity(player, character)
+    print("[PlayerStateService] Entity created for", player.Name)
+
     if not character then return end
     
     -- Cleanup old mapping if exists
@@ -60,6 +62,13 @@ Players.PlayerAdded:Connect(function(player)
 end)
 
 Players.PlayerRemoving:Connect(removeEntity)
+
+-- [FIX] Register existing players (Module is lazy-loaded)
+for _, player in ipairs(Players:GetPlayers()) do
+    if player.Character then
+        createEntity(player, player.Character)
+    end
+end
 
 -- Update Loop (Heartbeat)
 RunService.Heartbeat:Connect(function(dt)

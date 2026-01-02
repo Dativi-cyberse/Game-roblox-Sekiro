@@ -29,6 +29,14 @@ local function isEntity(e)
 	return type(e) == "table"
 end
 
+local function getEntityName(e)
+	if not isEntity(e) then return "nil" end
+	if e.EntityId then return tostring(e.EntityId) end
+	if e.Model and e.Model.Name then return e.Model.Name end
+	if e.Character and e.Character.Name then return e.Character.Name end
+	return "Unknown"
+end
+
 -- =========================
 -- GUARD / POSTURE DAMAGE
 -- =========================
@@ -116,11 +124,11 @@ end
 -- =========================
 function CombatService.ProcessAttack(attackerEntity, targetEntity, weaponTable)
 	-- [DEBUG] Log IDs
-	local aId = attackerEntity and (attackerEntity.EntityId or attackerEntity.Model.Name) or "nil"
-	local tId = targetEntity and (targetEntity.EntityId or targetEntity.Model.Name) or "nil"
+	local aId = getEntityName(attackerEntity)
+	local tId = getEntityName(targetEntity)
 	local atkId = weaponTable and weaponTable.attackId or "nil"
 	
-	-- print(string.format("[CombatService] ProcessAttack: %s -> %s [AttackID: %s]", aId, tId, atkId))
+	print(string.format("[CombatService] ProcessAttack: %s -> %s [AttackID: %s]", aId, tId, atkId))
 
 	-- [MUGEN FIX] Strict Entity Validation
 	if not isEntity(attackerEntity) or not isEntity(targetEntity) or not attackerEntity.RootPart or not targetEntity.RootPart then
@@ -203,18 +211,26 @@ function CombatService.ProcessAttack(attackerEntity, targetEntity, weaponTable)
 	-- GUARD CHECK
 	-- =========================
 	local isGuarding = false
-	if targetEntity.State == "Guarding"
-		or targetEntity.state == "Guarding"
-		or targetEntity.IsGuarding then
+	
+	-- [FIX] Server Authoritative Guard Check
+	-- Ignore client state strings; rely on flags and enforce timeouts
+	if targetEntity.IsGuarding or targetEntity._isGuarding or targetEntity._isParrying then
 		isGuarding = true
-	elseif (targetEntity.Shield or targetEntity.Guard or 0) > 0 then
-		isGuarding = targetEntity._isGuarding == true
+		
+		-- Enforce strict time window for Players to prevent infinite invincibility
+		if not targetEntity.IsNPC then
+			local guardTime = targetEntity.parryIntentTime or 0
+			if (now() - guardTime) > 0.75 then
+				isGuarding = false
+			end
+		end
 	end
 
 	-- =========================
 	-- CLASH CHECK
 	-- =========================
-	if attackerEntity._lastAttackTime and targetEntity._lastAttackTime then
+	-- [FIX] Disable Clash for NPC attackers to ensure they always hit (unless blocked)
+	if attackerEntity._lastAttackTime and targetEntity._lastAttackTime and not attackerEntity.IsNPC then
 		local aHit = { hitTime = attackerEntity._lastAttackTime, weapon = weapon }
 		local dHit = { hitTime = targetEntity._lastAttackTime, weapon = targetEntity.weapon or {} }
 

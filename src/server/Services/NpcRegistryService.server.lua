@@ -7,6 +7,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
 local Workspace = game:GetService("Workspace")
 local RunService = game:GetService("RunService")
+local Services = ServerScriptService:WaitForChild("Services")
 
 -- =========================
 -- DEPENDENCIES
@@ -14,6 +15,7 @@ local RunService = game:GetService("RunService")
 
 local AI = ServerScriptService:WaitForChild("AI")
 local DummyEntity = require(AI:WaitForChild("DummyEntity"))
+local HitboxService = require(Services:WaitForChild("HitboxService"))
 
 -- =========================
 -- GLOBAL REGISTRIES
@@ -22,6 +24,7 @@ local DummyEntity = require(AI:WaitForChild("DummyEntity"))
 _G.NPC_ENTITIES = _G.NPC_ENTITIES or {} -- [Model] = Entity
 _G.NPC_ID_MAP = _G.NPC_ID_MAP or {}     -- [EntityId] = Entity
 
+local lastNpcStates = {}                -- [Entity] = StateString
 local registeredNPCs = {}               -- local ownership tracking
 
 -- =========================
@@ -102,6 +105,7 @@ local function registerNpc(model)
 	-- Register globally
 	_G.NPC_ENTITIES[model] = entity
 	registeredNPCs[model] = entity
+	lastNpcStates[entity] = entity.State or "Idle"
 
 	-- Map EntityId
 	if entityId then
@@ -117,6 +121,7 @@ local function registerNpc(model)
 		if not parent then
 			_G.NPC_ENTITIES[model] = nil
 			registeredNPCs[model] = nil
+			lastNpcStates[entity] = nil
 
 			if entityId then
 				_G.NPC_ID_MAP[entityId] = nil
@@ -165,8 +170,37 @@ RunService.Heartbeat:Connect(function(dt)
 			if entity.Update then
 				entity:Update(dt)
 			end
+
+			-- [FIX] Trigger Hitbox on Attack State Entry
+			local currentState = entity.State or "Idle"
+			local isAttackState = (currentState == "Attack" or currentState == "Attacking" or currentState == "AttackState")
+			local wasAttackState = (lastNpcStates[entity] == "Attack" or lastNpcStates[entity] == "Attacking" or lastNpcStates[entity] == "AttackState")
+
+			if currentState ~= lastNpcStates[entity] then
+				-- [FIX] Only trigger when entering Attack from a NON-Attack state (prevents jitter/multi-proc)
+				if isAttackState and not wasAttackState then
+					print("[NPC AttackState] Enter:", model.Name)
+					
+					-- [FIX] Immediate Hitbox + Debounce
+					local now = os.clock()
+					if not entity._lastAttackDispatch or (now - entity._lastAttackDispatch > 0.5) then
+						entity._lastAttackDispatch = now
+						print("[NPC AttackState] Spawning hitbox:", model.Name)
+						
+						HitboxService.SpawnNpcHitbox(entity, {
+							Damage = 30, -- Increased to ensure visible damage after scaling
+							PostureDamage = 20,
+							Range = 6,
+							Width = 4,
+							attackId = "NPC_" .. tostring(now)
+						})
+					end
+				end
+				lastNpcStates[entity] = currentState
+			end
 		else
 			registeredNPCs[model] = nil
+			lastNpcStates[entity] = nil
 		end
 	end
 end)

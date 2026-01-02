@@ -10,6 +10,7 @@ function PlayerEntity.new(player, character)
 
     self.Player = player
     self.Character = character
+    self.Model = character -- [FIX] Ensure CombatService can generate unique ID
     self.Humanoid = character:FindFirstChild("Humanoid")
     self.RootPart = character:FindFirstChild("HumanoidRootPart") or character:FindFirstChild("Torso") or character.PrimaryPart
 
@@ -24,8 +25,10 @@ function PlayerEntity.new(player, character)
     self.MaxGuard = 100
 
     -- State Flags
+    self.EntityType = "PLAYER" -- [FIX] Enable correct damage scaling in CombatService
     self.State = "Idle" -- "Idle", "Guarding", "Staggered", "Dead"
     self._isGuarding = false
+    self._isParrying = false
     self._isGuardBroken = false
     self._isDead = false
 
@@ -78,6 +81,19 @@ function PlayerEntity:Update(dt)
         self._isGuardBroken = false
         if self.State == "Staggered" then
             self.State = "Idle"
+        end
+    end
+
+    -- 4. Auto-expire Guard/Parry State (Server Authoritative Timeout)
+    -- Fixes invincibility bug where player gets stuck in Guarding state
+    if self._isGuarding or self._isParrying then
+        local elapsed = now - (self.parryIntentTime or 0)
+        if elapsed > 0.75 then -- Max guard window
+            self._isGuarding = false
+            self._isParrying = false
+            if self.State == "Guarding" then
+                self.State = "Idle"
+            end
         end
     end
 end
