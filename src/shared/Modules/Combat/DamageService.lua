@@ -1,115 +1,77 @@
--- DamageService.lua
--- Calculates health and posture damage based on combat context
--- WHY: Centralizes damage calculation logic for consistency and easy tuning
+-- DamageCalculator.lua
+-- Tính toán sát thương chuẩn xác cho Server (Đã fix lỗi Mismatched Variables)
 
 local CombatConfig = require(script.Parent.Parent.Parent.CombatConfig)
 
-local DamageService = {}
+local DamageCalculator = {}
 
--- =====================================================
--- DAMAGE CALCULATION
--- =====================================================
-
---- Calculates damage for a standard attack
--- @param attackerState table - Attacker's state
--- @param defenderState table - Defender's state
--- @param attackData table - { isBlocking: boolean, wasParried: boolean, isUnblockable: boolean }
--- @return table - { healthDamage: number, postureDamage: number }
-function DamageService.CalculateAttackDamage(attackerState, defenderState, attackData)
+function DamageCalculator.Calculate(attackerState, defenderState, weaponData, attackData)
 	attackData = attackData or {}
+	weaponData = weaponData or {}
 	
-	local healthDamage = CombatConfig.Attack.BaseDamage
-	local postureDamage = CombatConfig.Attack.BasePostureDamage
+	-- Lấy Base Damage từ vũ khí truyền vào, nếu không có thì lấy trong Config
+	local baseDamage = weaponData.Damage or CombatConfig.Attack.BaseDamage or 10
+	local basePosture = weaponData.PostureDamage or CombatConfig.Attack.BasePostureDamage or 15
 	
-	-- Apply parry effects (parry negates most damage)
+	-- [JJS FIX]: Khuếch đại sát thương cho đòn Finisher
+	-- Hỗ trợ đọc IsFinisher từ cả weaponData và attackData
+	local isFinisher = weaponData.IsFinisher or attackData.IsFinisher or (weaponData.comboIndex == 4)
+	if isFinisher then
+		baseDamage = baseDamage * 1.5 -- Tăng 50% sát thương
+		basePosture = basePosture * 2.0 -- Phá giáp gấp đôi
+	end
+	
+	-- 1. KIỂM TRA PARRY
 	if attackData.wasParried then
-		-- Attack was parried - attacker takes posture damage, defender takes minimal cost
 		return {
-			healthDamage = 0, -- Parried attacks deal no health damage
-			postureDamage = 0, -- Posture damage handled separately by ParryService
-			toAttacker = {
-				healthDamage = 0,
-				postureDamage = CombatConfig.Parry.PostureDamage, -- Large posture penalty to attacker
-			}
+			hpToDefender = 0, 
+			postureToDefender = 0, 
+			postureToAttacker = CombatConfig.Parry.PostureDamage or 20, 
 		}
 	end
 	
-	-- Apply block effects
-	if attackData.isBlocking then
-		-- Blocking reduces health damage but still takes posture damage
-		healthDamage = healthDamage * CombatConfig.Block.HealthReduction
-		postureDamage = postureDamage * CombatConfig.Block.PostureDamageMultiplier
+	-- 2. KIỂM TRA THỦ (GUARD/BLOCK)
+	-- Đã fix: Nhận diện cả isGuarding và isBlocking
+	local isDefending = attackData.isGuarding or attackData.isBlocking
+	
+	if isDefending then
+		-- Giảm sát thương máu, nhưng giữ nguyên (hoặc tăng) sát thương giáp
+		local reduction = CombatConfig.Block.HealthReduction or 0.2
+		local postureMult = CombatConfig.Block.PostureDamageMultiplier or 1.5
+		
+		baseDamage = baseDamage * reduction
+		basePosture = basePosture * postureMult
 	end
 	
-	-- Apply unblockable effects
+	-- 3. ĐÒN KHÔNG THỂ THỦ (UNBLOCKABLE)
 	if attackData.isUnblockable then
-		-- Unblockable attacks bypass block and deal increased posture damage
-		if attackData.isBlocking then
-			postureDamage = postureDamage * CombatConfig.Block.UnblockableMultiplier
+		if isDefending then
+			-- Phá giáp cực mạnh nếu cố tình thủ đòn Unblockable
+			basePosture = basePosture * (CombatConfig.Block.UnblockableMultiplier or 2.5)
 		end
-		-- Health damage is not reduced by block
-		healthDamage = CombatConfig.Attack.BaseDamage
+		-- Phục hồi lại sát thương máu (không bị giảm bởi Guard)
+		baseDamage = weaponData.Damage or CombatConfig.Attack.BaseDamage or 10
+		if isFinisher then baseDamage = baseDamage * 1.5 end
 	end
 	
-	-- Apply failed parry penalty
+	-- 4. TRƯỢT PARRY (FAILED PARRY)
 	if attackData.failedParry then
-		-- Defender attempted parry but missed - take increased damage
-		healthDamage = healthDamage * CombatConfig.Parry.FailedHealthDamageMultiplier
-		postureDamage = postureDamage + CombatConfig.Parry.FailedPostureDamage
+		baseDamage = baseDamage * (CombatConfig.Parry.FailedHealthDamageMultiplier or 1.2)
+		basePosture = basePosture + (CombatConfig.Parry.FailedPostureDamage or 10)
 	end
 	
-	-- Attacker posture cost for attacking
-	local attackerPostureCost = CombatConfig.Posture.AttackCost
-	if attackData.isBlocking then
-		attackerPostureCost = CombatConfig.Posture.BlockedAttackCost
+	-- Tính toán cost cho người tấn công
+	local attackerPostureCost = CombatConfig.Posture.AttackCost or 5
+	if isDefending then
+		attackerPostureCost = CombatConfig.Posture.BlockedAttackCost or 10
 	end
 	
+	-- TRẢ VỀ ĐÚNG TÊN BIẾN MÀ COMBAT SERVICE ĐANG TÌM KIẾM
 	return {
-		healthDamage = healthDamage,
-		postureDamage = postureDamage,
-		toAttacker = {
-			healthDamage = 0,
-			postureDamage = attackerPostureCost, -- Attacker pays posture cost for attacking
-		}
+		hpToDefender = math.floor(baseDamage),
+		postureToDefender = math.floor(basePosture),
+		postureToAttacker = attackerPostureCost,
 	}
 end
 
---- Calculates damage for a successful parry
--- @param attackerState table - Character who got parried
--- @param defenderState table - Character who parried
--- @return table - Damage results
-function DamageService.CalculateParryDamage(attackerState, defenderState)
-	local parryResult = {
-		toAttacker = {
-			healthDamage = 0,
-			postureDamage = CombatConfig.Parry.PostureDamage, -- Large posture damage to attacker
-		},
-		toDefender = {
-			healthDamage = 0,
-			postureDamage = CombatConfig.Parry.PosturePenalty, -- Small posture cost for parrying
-		}
-	}
-	
-	return parryResult
-end
-
---- Applies health damage to a character
--- @param characterState table - Character state object
--- @param amount number - Amount of health damage
-function DamageService.ApplyHealthDamage(characterState, amount)
-	if not characterState or type(amount) ~= "number" then
-		return
-	end
-	
-	characterState.Health = characterState.Health or 100
-	characterState.MaxHealth = characterState.MaxHealth or 100
-	
-	characterState.Health = math.max(0, math.min(
-		characterState.Health - amount,
-		characterState.MaxHealth
-	))
-end
-
-return DamageService
-
-
+return DamageCalculator

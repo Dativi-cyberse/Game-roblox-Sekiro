@@ -77,7 +77,8 @@ ensureRemoteEvent(Combat, "GuardEvent")       -- guard / hold block (legacy)
 ensureRemoteEvent(Combat, "ClashEvent")       -- sword clash / deflect
 ensureRemoteEvent(Combat, "SprintEvent")      -- sprint / dash
 ensureRemoteEvent(Combat, "TargetLockEvent")  -- lock-on target
-
+-- Dùng để Server gửi tín hiệu phát hiệu ứng (Máu, Tia lửa, Âm thanh) về cho Client
+ensureRemoteEvent(Combat, "VFXEvent")
 ----------------------------------------------------------------
 -- Interaction Remotes
 ----------------------------------------------------------------

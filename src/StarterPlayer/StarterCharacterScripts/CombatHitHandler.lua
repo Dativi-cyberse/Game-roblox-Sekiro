@@ -51,14 +51,19 @@ function CombatHitHandler:_bindAnimationSignals()
 end
 
 -- =====================
--- TARGET RESOLUTION
+-- TARGET RESOLUTION (FIXED)
 -- =====================
 function CombatHitHandler:_resolveTargetEntityId()
 	local tr = self.context.TargetResolver
 	if tr and tr.GetLockedTarget then
 		local model = tr:GetLockedTarget()
-		if model and model:GetAttribute("EntityId") then
-			return model:GetAttribute("EntityId")
+		if model then
+			-- Ưu tiên Attribute, sau đó đến StringValue
+			local id = model:GetAttribute("EntityId")
+			if not id and model:FindFirstChild("EntityId") then
+				id = model.EntityId.Value
+			end
+			if id then return id end
 		end
 	end
 
@@ -67,13 +72,23 @@ function CombatHitHandler:_resolveTargetEntityId()
 
 	local closest, dist = nil, math.huge
 	for _, model in pairs(Workspace:GetChildren()) do
-		if model:IsA("Model") and model:GetAttribute("EntityId") then
+		-- [FIX QUAN TRỌNG]: Chặn ngay nếu model là nhân vật của mình
+		if model:IsA("Model") and model.Name ~= player.Name then 
+			local humanoid = model:FindFirstChildOfClass("Humanoid")
 			local hrp = model:FindFirstChild("HumanoidRootPart")
-			if hrp then
+			
+			if humanoid and humanoid.Health > 0 and hrp then
 				local d = (hrp.Position - root.Position).Magnitude
 				if d < 8 and d < dist then
 					dist = d
-					closest = model:GetAttribute("EntityId")
+					
+					-- Check Attribute -> Check StringValue -> Fallback lấy tên Model
+					local id = model:GetAttribute("EntityId")
+					if not id then
+						local idValue = model:FindFirstChild("EntityId")
+						id = (idValue and idValue:IsA("StringValue")) and idValue.Value or model.Name
+					end
+					closest = id
 				end
 			end
 		end

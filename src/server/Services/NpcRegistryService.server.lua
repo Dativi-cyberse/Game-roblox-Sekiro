@@ -63,7 +63,7 @@ local function isValidNpc(model)
 end
 
 -- =========================
--- REGISTRATION
+-- REGISTRATION (UPDATED FOR BOSS)
 -- =========================
 
 local function registerNpc(model)
@@ -87,13 +87,31 @@ local function registerNpc(model)
 	entity.EntityId = entityId
 
 	-- =========================
+	-- [NEW] BOSS CONFIGURATION
+	-- =========================
+	local isBoss = model:GetAttribute("IsBoss") == true
+	entity.IsBoss = isBoss
+	
+	if isBoss then
+		-- Boss có chỉ số vượt trội
+		entity.MaxPosture = model:GetAttribute("MaxPosture") or 300
+		entity.Posture = entity.MaxPosture
+		entity.Lives = model:GetAttribute("Lives") or 2 -- Boss thường có 2 mạng (2 chấm đỏ)
+		print("[NpcRegistryService] !!! BOSS DETECTED !!!:", model.Name, "| Lives:", entity.Lives)
+	else
+		-- Quái thường
+		entity.MaxPosture = 100
+		entity.Posture = 100
+		entity.Lives = 1
+	end
+
+	-- =========================
 	-- OPTIONAL: legacy compatibility
-	-- (Do NOT rely on this for main damage path)
 	-- =========================
 	function entity:ApplyDamage(data)
 		local amount = (data and data.amount) or 0
 		self.Health = math.max(0, (self.Health or 0) - amount)
-
+		
 		print(
 			"[NpcRegistryService] ApplyDamage called (legacy)",
 			"| EntityId =", self.EntityId,

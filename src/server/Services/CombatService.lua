@@ -14,7 +14,7 @@ local ShieldSystem = require(Modules.Combat.ShieldSystem)
 local Sprint = require(Modules.Movement.Sprint)
 local TargetValidator = require(Modules.Targeting.TargetValidator)
 local WeaponData = require(Modules.Weapons.WeaponData)
-
+local VFXEvent = Shared:WaitForChild("Remotes"):WaitForChild("Combat"):WaitForChild("VFXEvent")
 local CombatService = {}
 
 CombatService.Config = {
@@ -79,15 +79,22 @@ function CombatService.ApplyGuardDamage(entity, amount)
 end
 
 -- =========================
--- APPLY DAMAGE RESULTS
+-- APPLY DAMAGE RESULTS (FIXED LỖI KHÔNG MẤT MÁU)
 -- =========================
 local function applyDamageResults(attacker, defender, res)
 	if not isEntity(defender) or type(res) ~= "table" then return end
 
+	-- 1. Trừ máu logic (Table Health) & Đồng bộ xuống Humanoid
 	if res.hpToDefender and type(res.hpToDefender) == "number" then
 		defender.Health = math.max(0, (defender.Health or 0) - res.hpToDefender)
+		
+		-- [FIX]: Trừ máu thực tế trên Roblox Model để UI cập nhật!
+		if defender.Humanoid then
+			defender.Humanoid:TakeDamage(res.hpToDefender)
+		end
 	end
 
+	-- 2. Trừ Posture (Giữ nguyên logic cũ của đệ)
 	if res.postureToDefender and type(res.postureToDefender) == "number" then
 		if defender.Posture ~= nil then
 			defender.Posture = math.clamp(
@@ -103,6 +110,7 @@ local function applyDamageResults(attacker, defender, res)
 		end
 	end
 
+	-- 3. Trừ Posture Attacker (Giữ nguyên logic)
 	if res.postureToAttacker and type(res.postureToAttacker) == "number" then
 		if attacker and attacker.Posture ~= nil then
 			attacker.Posture = math.clamp(
@@ -157,21 +165,18 @@ function CombatService.ProcessAttack(attackerEntity, targetEntity, weaponTable)
 	end
 
 	-- [FIX] Range Check (Server Authoritative)
-	-- Even if state-based, ensure we aren't hitting across the map
 	local dist = (attackerEntity.RootPart.Position - targetEntity.RootPart.Position).Magnitude
-	if dist > 12 then -- Generous hit range for boss
+	if dist > 12 then 
 		return { outcome = "MISS", reason = "Out of range" }
 	end
 
 	-- [FIX] NPC Damage Scaling vs Player
 	if attackerEntity.IsNPC and targetEntity.EntityType == "PLAYER" then
-		-- Scale down NPC damage to be fair (30% of raw damage)
-		weapon.Damage = math.floor((weapon.Damage or 10) * 0.3)
+		-- Tăng lên 0.7 hoặc bỏ luôn nếu muốn test sát thương thật
+		weapon.Damage = math.max(1, math.floor((weapon.Damage or 15) * 0.7)) 
 	end
-
-	-- [FIX] Ensure damage is not zeroed out by missing data
 	if not weapon.Damage or weapon.Damage <= 0 then
-		weapon.Damage = 5 -- Fallback damage
+		weapon.Damage = 5 
 	end
 
 	-- =========================
@@ -208,28 +213,23 @@ function CombatService.ProcessAttack(attackerEntity, targetEntity, weaponTable)
 	end
 
 	-- =========================
-	-- GUARD CHECK
+	-- GUARD CHECK (FIXED LỖI XUYÊN THỦ)
 	-- =========================
 	local isGuarding = false
 	
-	-- [FIX] Server Authoritative Guard Check
-	-- Ignore client state strings; rely on flags and enforce timeouts
-	if targetEntity.IsGuarding or targetEntity._isGuarding or targetEntity._isParrying then
+	-- Quét sạch mọi biến trạng thái thủ có thể có
+	local isBlockingState = false
+	if targetEntity.StateMachine and targetEntity.StateMachine.CurrentState then
+		isBlockingState = (targetEntity.StateMachine.CurrentState.Name == "Blocking" or targetEntity.StateMachine.CurrentState.Name == "Guarding")
+	end
+	
+	if targetEntity.IsGuarding or targetEntity._isGuarding or targetEntity.IsBlocking or targetEntity._isBlocking or targetEntity._isParrying or isBlockingState then
 		isGuarding = true
-		
-		-- Enforce strict time window for Players to prevent infinite invincibility
-		if not targetEntity.IsNPC then
-			local guardTime = targetEntity.parryIntentTime or 0
-			if (now() - guardTime) > 0.75 then
-				isGuarding = false
-			end
-		end
 	end
 
 	-- =========================
 	-- CLASH CHECK
 	-- =========================
-	-- [FIX] Disable Clash for NPC attackers to ensure they always hit (unless blocked)
 	if attackerEntity._lastAttackTime and targetEntity._lastAttackTime and not attackerEntity.IsNPC then
 		local aHit = { hitTime = attackerEntity._lastAttackTime, weapon = weapon }
 		local dHit = { hitTime = targetEntity._lastAttackTime, weapon = targetEntity.weapon or {} }
@@ -250,7 +250,7 @@ function CombatService.ProcessAttack(attackerEntity, targetEntity, weaponTable)
 	end
 
 	-- =========================
-	-- NORMAL HIT
+	-- NORMAL HIT CALCULATION
 	-- =========================
 	local calc = DamageCalculator.Calculate(
 		attackerEntity,
@@ -259,6 +259,12 @@ function CombatService.ProcessAttack(attackerEntity, targetEntity, weaponTable)
 		{ isGuarding = isGuarding }
 	)
 
+	-- =========================
+	-- FINISHER KNOCKBACK & STATE UPDATE (JJS/MUGEN STYLE)
+	-- =========================
+	local isFinisher = (weaponTable and weaponTable.comboIndex == 4) or weaponTable.IsFinisher
+	
+	-- Áp dụng sát thương cuối cùng
 	applyDamageResults(attackerEntity, targetEntity, calc)
 
 	if (targetEntity.Posture and targetEntity.Posture <= 0) or targetEntity._isGuardBroken then
@@ -266,48 +272,89 @@ function CombatService.ProcessAttack(attackerEntity, targetEntity, weaponTable)
 	end
 
 	-- =========================
-	-- FINISHER KNOCKBACK (COMBO-BASED)
+	-- TENACITY REACTION LOGIC (BOSS VS MOB)
 	-- =========================
-	-- [MUGEN SAFE CHANGE]
-	-- Finisher is determined by comboIndex from client (hit 4)
-	if weaponTable
-		and weaponTable.comboIndex == 4
-		and targetEntity.RootPart
-		and attackerEntity.RootPart then
-
-		local dir = targetEntity.RootPart.Position - attackerEntity.RootPart.Position
-		if dir.Magnitude < 0.1 then
-			dir = attackerEntity.RootPart.CFrame.LookVector
+	local isBoss = targetEntity.IsBoss or targetEntity.EntityType == "BOSS"
+	local shouldStun = true -- Mặc định là bị khựng
+	
+	if isBoss then
+		-- Nếu là Boss, chỉ bị khựng khi Posture về 0 (hoặc là đòn Finisher hất văng)
+		if (targetEntity.Posture and targetEntity.Posture > 0) and not isFinisher then
+			shouldStun = false
+			print("[CombatService] Boss absorbed hit (Tenacity active) - No Flinch!")
 		end
-		
-		dir = Vector3.new(dir.X, 0, dir.Z).Unit
-		local knockbackDir = (dir + Vector3.new(0, 0.25, 0)).Unit
+	end
 
-		-- [FIX] Ensure physics apply and AI doesn't snap back
-		targetEntity.RootPart.Anchored = false
-		targetEntity.RootPart.AssemblyLinearVelocity = knockbackDir * 90
-
-		if targetEntity.Humanoid then
-			-- [NPC FIX] Force state change to prevent NavMesh snapping
-			targetEntity.Humanoid:ChangeState(Enum.HumanoidStateType.Physics)
-			targetEntity.Humanoid.PlatformStand = true
+	-- Xử lý Vật lý (Ragdoll/Knockback)
+	if targetEntity.RootPart and attackerEntity.RootPart then
+		if isFinisher then
+			-- [JJS STYLE] Hất văng
+			local dir = targetEntity.RootPart.Position - attackerEntity.RootPart.Position
+			if dir.Magnitude < 0.1 then
+				dir = attackerEntity.RootPart.CFrame.LookVector
+			end
 			
-			task.delay(0.5, function()
-				if targetEntity.Humanoid and targetEntity.Humanoid.Health > 0 then
-					targetEntity.Humanoid.PlatformStand = false
-					targetEntity.Humanoid:ChangeState(Enum.HumanoidStateType.GettingUp)
-				end
-			end)
+			dir = Vector3.new(dir.X, 0, dir.Z).Unit
+			local knockbackDir = (dir + Vector3.new(0, 0.35, 0)).Unit -- Hất chếch lên trên
+
+			targetEntity.RootPart.Anchored = false
+			targetEntity.RootPart.AssemblyLinearVelocity = knockbackDir * 100 -- Lực đập mạnh
+
+			-- Ragdoll NPC
+			if targetEntity.Humanoid then
+				targetEntity.Humanoid:ChangeState(Enum.HumanoidStateType.Physics)
+				targetEntity.Humanoid.PlatformStand = true
+				
+				task.delay(1.5, function() -- Thời gian nằm sân dài
+					if targetEntity.Humanoid and targetEntity.Humanoid.Health > 0 then
+						targetEntity.Humanoid.PlatformStand = false
+						targetEntity.Humanoid:ChangeState(Enum.HumanoidStateType.GettingUp)
+					end
+				end)
+			end
+		elseif shouldStun then
+			-- Chỉ reset Velocity (khựng vật lý) nếu mục tiêu thực sự bị stun
+			targetEntity.RootPart.AssemblyLinearVelocity = Vector3.new(0,0,0)
+		end
+	end
+
+	-- Ép mục tiêu chuyển State sang HitStun (Đồng bộ FSM)
+	if shouldStun and targetEntity.StateMachine then
+		-- Gắn data để HitStunState biết có phải Finisher hay không
+		targetEntity.lastHitData = {
+			IsFinisher = isFinisher,
+			AttackerCFrame = attackerEntity.RootPart.CFrame
+		}
+		
+		if targetEntity.States and targetEntity.States.HitStun then
+			targetEntity.StateMachine:ChangeState(targetEntity.States.HitStun)
 		end
 	end
 
 	attackerEntity._lastAttackTime = attackTime
 
-	print(
-		"[CombatService] Damage applied",
-		"HP =", targetEntity.Health,
-		"Posture =", targetEntity.Posture
-	)
+	-- =========================
+	-- [VFX/SFX] BÓP CÒ GỬI TÍN HIỆU VỀ CLIENT
+	-- =========================
+	local hitType = "NormalHit"
+	
+	if isGuarding then
+		hitType = "Blocked"       -- Nếu đang thủ -> Báo Keng
+	elseif isFinisher then
+		hitType = "FinisherHit"   -- Nếu là đòn thứ 4 -> Báo Nổ/Chí mạng
+	elseif isBoss and not shouldStun then
+		hitType = "SuperArmor"    -- Boss lỳ đòn -> Báo Đánh vào đá
+	end
+
+	-- Lấy Model của Dummy/Mục tiêu và vị trí chém
+	local targetChar = targetEntity.Character or targetEntity.Model
+	local hitPosition = targetEntity.RootPart and targetEntity.RootPart.Position
+
+	if targetChar and hitPosition then
+		VFXEvent:FireAllClients(hitType, targetChar, hitPosition)
+		print("[CombatService] ĐÃ BÓP CÒ VFX:", hitType)
+	end
+	-- =========================
 
 	return { outcome = "HIT", calc = calc }
 end
